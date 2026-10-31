@@ -22,8 +22,12 @@
 use super::TuiState;
 use ratatui::prelude::*;
 
-/// Sidebar width in columns (border column included).
+/// Sidebar width in columns (border column included) on 110-179 col terminals.
 pub(crate) const SIDEBAR_WIDTH: u16 = 26;
+/// Sidebar width on wide terminals (fits the 48px sprite, cards breathe).
+pub(crate) const SIDEBAR_WIDE_WIDTH: u16 = 52;
+/// Narrowest chat area that gets the wide sidebar.
+pub(crate) const SIDEBAR_WIDE_MIN_TOTAL_WIDTH: u16 = 180;
 /// Narrowest chat area that still gets the sidebar.
 pub(crate) const SIDEBAR_MIN_TOTAL_WIDTH: u16 = 110;
 /// Narrowest chat area that gets the cockpit at all (header/composer/footer).
@@ -55,8 +59,9 @@ pub(crate) fn cockpit_layout(area: Rect) -> Option<CockpitRects> {
     let footer = Rect::new(area.x, area.bottom() - 1, area.width, 1);
     let body = Rect::new(area.x, area.y + 1, area.width, area.height - 2);
     if area.width >= SIDEBAR_MIN_TOTAL_WIDTH {
-        let main = Rect::new(body.x, body.y, body.width - SIDEBAR_WIDTH, body.height);
-        let sidebar = Rect::new(main.right(), body.y, SIDEBAR_WIDTH, body.height);
+        let width = sidebar_width(area.width);
+        let main = Rect::new(body.x, body.y, body.width - width, body.height);
+        let sidebar = Rect::new(main.right(), body.y, width, body.height);
         Some(CockpitRects { header, main, sidebar: Some(sidebar), footer })
     } else {
         Some(CockpitRects { header, main: body, sidebar: None, footer })
@@ -67,7 +72,38 @@ pub(crate) fn cockpit_layout(area: Rect) -> Option<CockpitRects> {
 /// cockpit enabled in config, conversation started). Layout may still fall
 /// back when [`cockpit_layout`] returns `None`.
 pub(crate) fn cockpit_wanted(state: &dyn TuiState) -> bool {
+    // Env overrides used by the welcome tests leak across parallel test
+    // threads; the cockpit reshapes the whole frame, so under `cfg(test)` it
+    // additionally needs a per-thread opt-in (see `CockpitTestOptIn`).
+    #[cfg(test)]
+    if !COCKPIT_TEST_OPT_IN.with(std::cell::Cell::get) {
+        return false;
+    }
     super::welcome::corner_sprite_wanted(state)
+}
+
+#[cfg(test)]
+thread_local! {
+    static COCKPIT_TEST_OPT_IN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// RAII opt-in to the cockpit for frames drawn on this test thread.
+#[cfg(test)]
+pub(crate) struct CockpitTestOptIn;
+
+#[cfg(test)]
+impl CockpitTestOptIn {
+    pub(crate) fn enable() -> Self {
+        COCKPIT_TEST_OPT_IN.with(|slot| slot.set(true));
+        Self
+    }
+}
+
+#[cfg(test)]
+impl Drop for CockpitTestOptIn {
+    fn drop(&mut self) {
+        COCKPIT_TEST_OPT_IN.with(|slot| slot.set(false));
+    }
 }
 
 /// Shorten a working directory for display: last path component only, never
@@ -79,6 +115,304 @@ pub(crate) fn short_dir(path: &str) -> String {
         .find(|part| !part.is_empty())
         .unwrap_or(trimmed)
         .to_string()
+}
+
+/// Sidebar width (border included) for a chat area `total` columns wide.
+pub(crate) fn sidebar_width(total: u16) -> u16 {
+    if total >= SIDEBAR_WIDE_MIN_TOTAL_WIDTH {
+        SIDEBAR_WIDE_WIDTH
+    } else {
+        SIDEBAR_WIDTH
+    }
+}
+
+// ------------------------------------------------- header / footer / sidebar ---
+
+/// Brand gradient endpoints, shared with the welcome hero (#3d5afe -> #b4c0ff).
+const GRAD_FROM: (u8, u8, u8) = (0x3d, 0x5a, 0xfe);
+const GRAD_TO: (u8, u8, u8) = (0xb4, 0xc0, 0xff);
+const WORDMARK: &str = "C R A C K E D  H A R N E S S";
+const WORDMARK_SHORT: &str = "CRACKED";
+
+fn gradient(t: f32) -> Color {
+    let t = t.clamp(0.0, 1.0);
+    let mix = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * t).round() as u8;
+    crate::tui::color_support::rgb(
+        mix(GRAD_FROM.0, GRAD_TO.0),
+        mix(GRAD_FROM.1, GRAD_TO.1),
+        mix(GRAD_FROM.2, GRAD_TO.2),
+    )
+}
+
+/// Hero composer border color.
+pub(crate) fn border_color() -> Color {
+    crate::tui::color_support::rgb(122, 134, 230)
+}
+
+fn model_color() -> Color {
+    crate::tui::color_support::rgb(180, 192, 255)
+}
+
+fn text_width(text: &str) -> u16 {
+    unicode_width::UnicodeWidthStr::width(text) as u16
+}
+
+fn truncate_end(text: &str, max: usize) -> String {
+    if (text_width(text) as usize) <= max {
+        return text.to_string();
+    }
+    if max == 0 {
+        return String::new();
+    }
+    let mut out = String::new();
+    let mut used = 0;
+    for ch in text.chars() {
+        let w = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+        if used + w + 1 > max {
+            break;
+        }
+        used += w;
+        out.push(ch);
+    }
+    out.push('…');
+    out
+}
+
+/// Write spans left to right from `x`, never past `max_x`. Returns the end x.
+fn put_spans(buf: &mut Buffer, mut x: u16, y: u16, max_x: u16, spans: &[Span<'_>]) -> u16 {
+    for span in spans {
+        if x >= max_x {
+            break;
+        }
+        let (nx, _) =
+            buf.set_stringn(x, y, span.content.as_ref(), (max_x - x) as usize, span.style);
+        x = nx;
+    }
+    x
+}
+
+fn spans_width(spans: &[Span<'_>]) -> u16 {
+    spans.iter().map(|s| text_width(s.content.as_ref())).sum()
+}
+
+fn wordmark_spans(text: &'static str) -> Vec<Span<'static>> {
+    let letters = text.chars().filter(|c| !c.is_whitespace()).count().max(2);
+    let mut i = 0usize;
+    text.chars()
+        .map(|ch| {
+            if ch.is_whitespace() {
+                return Span::raw(" ");
+            }
+            let color = gradient(i as f32 / (letters - 1) as f32);
+            i += 1;
+            Span::styled(
+                ch.to_string(),
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
+            )
+        })
+        .collect()
+}
+
+fn compact_version(version: &str) -> String {
+    let trimmed = version.trim();
+    match trimmed.split_once(" (") {
+        Some((head, _)) => head.trim().to_string(),
+        None => trimmed.to_string(),
+    }
+}
+
+/// One-row brand header: gradient wordmark · model · session on the left,
+/// `<short_dir> · <branch>` on the right. Never shows a full path.
+pub(crate) fn draw_header(buf: &mut Buffer, area: Rect, app: &dyn TuiState) {
+    let area = area.intersection(*buf.area());
+    if area.is_empty() {
+        return;
+    }
+    let dim = Style::default().fg(super::dim_color());
+    let sep = || Span::styled(" · ", dim);
+    let model = app.provider_model();
+    let model = (!model.trim().is_empty())
+        .then(|| crate::tui::session_facts::pretty_model(&model))
+        .filter(|m| !m.trim().is_empty());
+    let session = app
+        .session_display_name()
+        .filter(|name| !name.trim().is_empty());
+    let dir = app
+        .working_dir()
+        .map(|dir| short_dir(&dir))
+        .filter(|dir| !dir.is_empty());
+    let branch = app.git_branch().filter(|b| !b.trim().is_empty());
+
+    let mut right: Vec<Span<'static>> = Vec::new();
+    if let Some(dir) = dir {
+        right.push(Span::styled(dir, Style::default().fg(model_color())));
+    }
+    if let Some(branch) = branch {
+        if !right.is_empty() {
+            right.push(sep());
+        }
+        right.push(Span::styled(truncate_end(&branch, 28), dim));
+    }
+
+    // Richest left side that still leaves room for the right side.
+    let budget = area.width.saturating_sub(2);
+    let right_w = spans_width(&right);
+    let mut left: Vec<Span<'static>> = Vec::new();
+    for (mark, with_session) in [
+        (WORDMARK, true),
+        (WORDMARK, false),
+        (WORDMARK_SHORT, true),
+        (WORDMARK_SHORT, false),
+    ] {
+        let mut spans = wordmark_spans(mark);
+        if let Some(model) = &model {
+            spans.push(sep());
+            spans.push(Span::styled(
+                model.clone(),
+                Style::default()
+                    .fg(model_color())
+                    .add_modifier(Modifier::BOLD),
+            ));
+        }
+        if with_session && let Some(session) = &session {
+            spans.push(sep());
+            spans.push(Span::styled(session.clone(), dim));
+        }
+        left = spans;
+        if spans_width(&left) + 3 + right_w <= budget {
+            break;
+        }
+    }
+    let left_end = put_spans(buf, area.x + 1, area.y, area.right().saturating_sub(1), &left);
+    // Right side, truncated to whatever is left after the left side.
+    let room = area.right().saturating_sub(1).saturating_sub(left_end + 2);
+    if room > 0 && !right.is_empty() {
+        let plain: String = right.iter().map(|s| s.content.as_ref()).collect();
+        if text_width(&plain) <= room {
+            let x = area.right().saturating_sub(1 + right_w);
+            put_spans(buf, x, area.y, area.right(), &right);
+        } else {
+            let text = truncate_end(&plain, room as usize);
+            let x = area.right().saturating_sub(1 + text_width(&text));
+            buf.set_stringn(x, area.y, &text, room as usize, dim);
+        }
+    }
+}
+
+/// Context usage as a 0-100 percentage, when both sides are known.
+fn context_percent(snap: &TokenSnapshot) -> Option<u64> {
+    let used = snap.context_used?;
+    let limit = snap.context_limit.filter(|limit| *limit > 0)?;
+    Some((used.saturating_mul(100) / limit).min(999))
+}
+
+/// One-row footer: slash-command menu left, `ctx NN% · jcode vX` right.
+pub(crate) fn draw_footer(buf: &mut Buffer, area: Rect, snap: &TokenSnapshot) {
+    let area = area.intersection(*buf.area());
+    if area.is_empty() {
+        return;
+    }
+    let dim = Style::default().fg(super::dim_color());
+    let version = format!("jcode {}", compact_version(jcode_build_meta::version()));
+    let right = match context_percent(snap) {
+        Some(pct) => format!("ctx {pct}% · {version}"),
+        None => version,
+    };
+    let right = truncate_end(&right, (area.width as usize).saturating_sub(2) / 2);
+    let right_w = text_width(&right);
+    buf.set_stringn(
+        area.right().saturating_sub(right_w + 1),
+        area.y,
+        &right,
+        right_w as usize,
+        dim,
+    );
+
+    let items = [("/resume", "Sessions"), ("/config", "Settings"), ("/help", "Help")];
+    let max_x = area.right().saturating_sub(right_w + 3);
+    let labelled: u16 = items
+        .iter()
+        .map(|(cmd, label)| text_width(cmd) + 1 + text_width(label))
+        .sum::<u16>()
+        + 2 * (items.len() as u16 - 1);
+    let with_labels = area.x + 1 + labelled <= max_x;
+    let mut spans = Vec::new();
+    for (i, (cmd, label)) in items.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::raw("  "));
+        }
+        spans.push(Span::styled(*cmd, Style::default().fg(super::accent_color())));
+        if with_labels {
+            spans.push(Span::styled(format!(" {label}"), dim));
+        }
+    }
+    put_spans(buf, area.x + 1, area.y, max_x, &spans);
+}
+
+/// Largest sprite sheet (index into `welcome::SPRITE_SIZES`) that fits the
+/// sidebar's inner width while leaving at least half the height for cards.
+fn sidebar_sprite_size(inner_width: u16, height: u16) -> Option<usize> {
+    [1usize, 2, 3].into_iter().find(|&idx| {
+        let (w, h) = super::welcome::sprite_cells(idx);
+        w + 1 <= inner_width && h + 1 <= height / 2
+    })
+}
+
+/// Draw the sidebar: dim left border, animated sprite (published as the idle
+/// animation rect for the cheap partial repaint), tokens card, agents card.
+/// Returns the sprite rect when one was drawn.
+pub(crate) fn draw_sidebar(
+    frame: &mut Frame,
+    app: &dyn TuiState,
+    area: Rect,
+    snap: &TokenSnapshot,
+) -> Option<Rect> {
+    let area = area.intersection(*frame.buffer_mut().area());
+    if area.width < 3 || area.height == 0 {
+        record_agent_hit_rows(Vec::new());
+        return None;
+    }
+    let dim = Style::default().fg(super::dim_color());
+    for y in area.top()..area.bottom() {
+        frame.buffer_mut()[(area.x, y)].set_char('│').set_style(dim);
+    }
+    let inner = Rect::new(area.x + 1, area.y, area.width - 1, area.height);
+    let mut y = inner.y + 1;
+    let mut sprite = None;
+    if let Some(idx) = sidebar_sprite_size(inner.width, inner.height) {
+        let (w, h) = super::welcome::sprite_cells(idx);
+        let rect = Rect::new(inner.x + (inner.width - w) / 2, y, w, h);
+        super::welcome::draw_corner_sprite(frame, app, rect, idx);
+        sprite = Some(rect);
+        y = rect.bottom() + 1;
+    }
+    // Cards get one column of padding on each side.
+    let card_x = inner.x + 1;
+    let card_w = inner.width.saturating_sub(2);
+    let mut remaining = inner.bottom().saturating_sub(y);
+    if card_w > 0 && remaining > 0 {
+        let used = draw_tokens_card(
+            frame.buffer_mut(),
+            Rect::new(card_x, y, card_w, remaining),
+            snap,
+        );
+        if used > 0 {
+            y += used + 1;
+        }
+        remaining = inner.bottom().saturating_sub(y);
+    }
+    if card_w > 0 && remaining > 0 {
+        let expanded = app.cockpit_expanded_agent();
+        draw_agents_card(
+            frame.buffer_mut(),
+            Rect::new(card_x, y, card_w, remaining),
+            &agent_rows(app),
+            expanded.as_deref(),
+        );
+    } else {
+        record_agent_hit_rows(Vec::new());
+    }
+    sprite
 }
 
 // ------------------------------------------------------------ tokens card ---

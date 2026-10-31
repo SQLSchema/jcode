@@ -471,6 +471,19 @@ pub(super) fn prepare_messages(
     width: u16,
     height: u16,
 ) -> Arc<PreparedChatFrame> {
+    prepare_messages_for(app, width, height, false)
+}
+
+/// [`prepare_messages`] with the cracked-fork cockpit switch. In the cockpit
+/// the one-row brand header replaces jcode's multi-line persistent header, so
+/// the header section (and its centering pad) is dropped and the transcript
+/// starts directly under the cockpit header.
+pub(super) fn prepare_messages_for(
+    app: &dyn TuiState,
+    width: u16,
+    height: u16,
+    cockpit: bool,
+) -> Arc<PreparedChatFrame> {
     // A cached prepared frame intentionally owns only image ids. Recover any
     // staged source evicted by the byte budget or a visibility toggle before an
     // exact frame-cache hit can bypass the normal anchored-image resolver.
@@ -478,7 +491,7 @@ pub(super) fn prepare_messages(
     super::inline_image_ui::restage_requested_payloads(app);
     super::note_prep_restage(restage_start.elapsed());
     if cfg!(test) {
-        return Arc::new(prepare_messages_inner(app, width, height));
+        return Arc::new(prepare_messages_inner(app, width, height, cockpit));
     }
 
     let key = FullPrepCacheKey {
@@ -495,7 +508,9 @@ pub(super) fn prepare_messages(
             .wrapping_mul(31)
             .wrapping_add(super::hash_text_for_cache(
                 app.pinned_todos_payload().unwrap_or(""),
-            )),
+            ))
+            // Cockpit frames omit the header section; never share entries.
+            ^ (u64::from(cockpit) << 63),
         diagram_mode: app.diagram_mode(),
         centered: app.centered_mode(),
         mermaid_aspect_bucket: crate::tui::mermaid::current_preferred_aspect_ratio_bucket(),
@@ -550,7 +565,7 @@ pub(super) fn prepare_messages(
     super::note_full_prep_cache_miss();
 
     let build_start = Instant::now();
-    let prepared = Arc::new(prepare_messages_inner(app, width, height));
+    let prepared = Arc::new(prepare_messages_inner(app, width, height, cockpit));
     super::note_full_prep_built(prepared.as_ref(), build_start.elapsed());
 
     {
@@ -598,9 +613,18 @@ fn build_top_pad_lines(width: u16, pad_top: usize) -> Vec<Line<'static>> {
     lines
 }
 
-fn prepare_messages_inner(app: &dyn TuiState, width: u16, height: u16) -> PreparedChatFrame {
+fn prepare_messages_inner(
+    app: &dyn TuiState,
+    width: u16,
+    height: u16,
+    cockpit: bool,
+) -> PreparedChatFrame {
     let header_start = Instant::now();
-    let header_prepared = prepare_header_cached(app, width);
+    let header_prepared = if cockpit {
+        Arc::new(empty_prepared_messages())
+    } else {
+        prepare_header_cached(app, width)
+    };
     let header_ms = header_start.elapsed().as_secs_f64() * 1000.0;
 
     let body_start = Instant::now();
@@ -767,7 +791,11 @@ fn prepare_messages_inner(app: &dyn TuiState, width: u16, height: u16) -> Prepar
     // Re-apply the initial-screen centering pad above the header so the
     // transition from the empty screen to the first message does not shift
     // anything. The pad scrolls off naturally as the transcript grows.
-    let pad_top = initial_header_pad_top(height, header_prepared.wrapped_lines.len());
+    let pad_top = if cockpit {
+        0
+    } else {
+        initial_header_pad_top(height, header_prepared.wrapped_lines.len())
+    };
     let padded_header = if pad_top > 0 {
         let mut lines = build_top_pad_lines(width, pad_top);
         lines.reserve(header_prepared.wrapped_lines.len());

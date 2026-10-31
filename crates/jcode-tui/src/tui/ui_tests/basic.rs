@@ -16,3 +16,4 @@ include!("basic/input_layout.rs");
 include!("basic/idle_animation_partial.rs");
 include!("basic/redraw_cadence.rs");
 include!("basic/welcome_hero.rs");
+include!("basic/cockpit_layout.rs");

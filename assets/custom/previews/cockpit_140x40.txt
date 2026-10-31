@@ -1,0 +1,40 @@
+ C R A C K E D  H A R N E S S · Opus 4.8                                                                                              jcode
+                                                                                                                  │
+                                                                                                                  │     ▄▀▀▀▀▀▀▀▀▀▀▀▄
+                                                                                                                  │    ▄▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                                                                                                  │    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                                                                                                  │   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                                                                                                  │    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                                                                                                  │    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                                                                                                  │     ▄▀▀▀▀▀▀▀▀▀▀▀ ▄
+                                                                                                                  │▄▀▄▄ ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                                                                                                  │▀▀▀▀▄▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                                                                                                  │ ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                                                                                                  │ ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                                                                                                  │ ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                                                                                                  │
+                                                                                                                  │ ╭ tokens ─────────────╮
+                                                                                                                  │ │in -  out -          │
+                                                                                                                  │ │cache r - w -        │
+                                                                                                                  │ │ctx --------- -      │
+                                                                                                                  │ ╰─────────────────────╯
+                                                                                                                  │
+                                                                                                                  │
+                                                                                                                  │
+                                                                                                                  │
+                                                                                                                  │
+                                                                                                                  │
+                                                                                                                  │
+                                                                                                                  │
+ 1› hello there                                                                                                  ││
+                                                                                                                  │
+ Hi! This is a long enough reply that it has to wrap across several rows so we can check it never runs            │
+ underneath the corner sprite in the top-right of the chat.                                                       │
+                                                                                                                  │
+ 2› and one more prompt that is long enough to wrap when the terminal is narrow, so the transcript really fills  ││
+ the main column edge to edge, every row of it                                                                   ││
+                                                                                                                  │
+╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮│
+│ 3> Say something, or type / for commands...                                                                    ││
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯│
+ /resume Sessions  /config Settings  /help Help                                                                         jcode v0.99.466-dev

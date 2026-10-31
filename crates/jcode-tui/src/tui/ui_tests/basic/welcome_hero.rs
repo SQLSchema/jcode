@@ -304,14 +304,19 @@ fn welcome_hero_gives_way_once_a_conversation_exists() {
 }
 
 /// RAII guard for `JCODE_CORNER_SPRITE`. Callers already hold the env lock
-/// through [`WelcomeStyleGuard`].
-struct CornerSpriteGuard;
+/// through [`WelcomeStyleGuard`]. Enabling it also opts this test thread into
+/// the cockpit layout (which supersedes the corner sprite).
+struct CornerSpriteGuard {
+    _cockpit: Option<crate::tui::ui::cockpit::CockpitTestOptIn>,
+}
 
 impl CornerSpriteGuard {
     fn set(enabled: bool) -> Self {
         crate::env::set_var("JCODE_CORNER_SPRITE", if enabled { "1" } else { "0" });
         crate::config::invalidate_config_cache();
-        Self
+        Self {
+            _cockpit: enabled.then(crate::tui::ui::cockpit::CockpitTestOptIn::enable),
+        }
     }
 }
 
@@ -356,9 +361,10 @@ fn corner_sprite_stays_top_right_after_first_message() {
         crate::tui::ui::last_idle_animation_kind(),
         crate::tui::ui::IdleAnimationKind::WelcomeSprite(_)
     ));
-    // Top-right of the terminal, inside the chat column.
-    assert_eq!(area.y, 0, "{area:?}");
-    assert!(area.right() >= 120 - 2 && area.right() <= 120, "{area:?}");
+    // Top-right of the terminal: since the cockpit, the sprite sits at the top
+    // of the right sidebar (under the one-row brand header).
+    assert!(area.y <= 2, "{area:?}");
+    assert!(area.right() >= 120 - 4 && area.right() <= 120, "{area:?}");
     let buf = terminal.backend().buffer();
     assert!(
         sprite_cells_in(buf, area) > (area.width as usize * area.height as usize) / 4,
@@ -369,7 +375,7 @@ fn corner_sprite_stays_top_right_after_first_message() {
         for x in area.left().saturating_sub(1)..area.right() {
             let s = buf[(x, y)].symbol();
             assert!(
-                s == " " || s == "▀" || s == "▄",
+                s == " " || s == "▀" || s == "▄" || s == "│",
                 "transcript glyph {s:?} under corner sprite at ({x},{y}):\n{text}"
             );
         }

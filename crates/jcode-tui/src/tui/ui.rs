@@ -2946,6 +2946,27 @@ fn draw_inner(frame: &mut Frame, app: &dyn TuiState) {
         (chat_area, None)
     };
 
+    // Cockpit (fork): once a conversation runs, the chat column gets a brand
+    // header, a right sidebar (sprite + tokens/agents cards), a rounded
+    // composer and a footer. Everything below lays out inside `main`, so the
+    // transcript, composer and info widgets never touch the sidebar. Too-small
+    // terminals (and any side pane) keep the classic layout.
+    let cockpit = if !swarm_page_active
+        && !side_panel_fullscreen
+        && pinned_diagram.is_none()
+        && diff_pane_area.is_none()
+        && !app.onboarding_welcome_active()
+        && cockpit::cockpit_wanted(app)
+    {
+        cockpit::cockpit_layout(chat_area)
+    } else {
+        None
+    };
+    let chat_area = cockpit.map_or(chat_area, |rects| rects.main);
+    // Rounded composer border plus one column of inner padding (cockpit only).
+    let composer_chrome: u16 = if cockpit.is_some() { 2 } else { 0 };
+    let composer_chrome_w: u16 = if cockpit.is_some() { 4 } else { 0 };
+
     // Inline swarm strip: when `swarm_spawn_mode = inline` and this session
     // manages agents, render a compact strip (vertical agent list by default,
     // see `agents.swarm_strip_layout`) directly above the status line instead
@@ -3011,13 +3032,17 @@ fn draw_inner(frame: &mut Frame, app: &dyn TuiState) {
 
     // Calculate input height based on the same wrapping logic used for rendering
     // (max 10 lines visible, scrolls if more).
-    let base_input_height =
-        input_ui::wrapped_input_line_count(app, chat_area.width, next_prompt).min(10) as u16;
+    let base_input_height = input_ui::wrapped_input_line_count(
+        app,
+        chat_area.width.saturating_sub(composer_chrome_w),
+        next_prompt,
+    )
+    .min(10) as u16;
     // Add 1 line for command suggestions, shell mode hints, or the Ctrl+Enter hint.
     let hint_line_height = input_ui::input_hint_line_height(app);
     let inline_block_height: u16 = inline_ui_height(app);
     let inline_ui_gap_height: u16 = if inline_block_height > 0 { 1 } else { 0 };
-    let input_height = base_input_height + hint_line_height;
+    let input_height = base_input_height + hint_line_height + composer_chrome;
 
     if let Some(ref mut capture) = debug_capture {
         capture.render_order.push("prepare_messages".to_string());
@@ -3029,6 +3054,7 @@ fn draw_inner(frame: &mut Frame, app: &dyn TuiState) {
     let corner_sprite = if !swarm_page_active
         && !side_panel_fullscreen
         && diff_pane_area.is_none()
+        && cockpit.is_none()
     {
         welcome::corner_sprite_layout(app, chat_area)
     } else {
@@ -3059,7 +3085,7 @@ fn draw_inner(frame: &mut Frame, app: &dyn TuiState) {
         let started = Instant::now();
         let prepared =
             mermaid::with_preferred_aspect_ratio(transcript_mermaid_aspect_ratio, || {
-                prepare::prepare_messages(app, width, chat_area.height)
+                prepare::prepare_messages_for(app, width, chat_area.height, cockpit.is_some())
             });
         note_prep_prepare_at(started.elapsed());
         prepared
@@ -3140,8 +3166,9 @@ fn draw_inner(frame: &mut Frame, app: &dyn TuiState) {
     let notification_height =
         input_ui::notification_height(app, chat_area.width).min(chat_area.height.saturating_sub(4));
     // Session status line (dir, branch, context, provider, model), always
-    // pinned directly below the input line.
-    let overscroll_height: u16 = 1;
+    // pinned directly below the input line. The cockpit header/footer carry
+    // those facts instead (without the full path).
+    let overscroll_height: u16 = if cockpit.is_some() { 0 } else { 1 };
     let fixed_height = 1
         + queued_height
         + swarm_strip_height
@@ -3259,10 +3286,12 @@ fn draw_inner(frame: &mut Frame, app: &dyn TuiState) {
         content_height
     };
 
-    // Use packed layout when content fits, scrolling layout otherwise
+    // Use packed layout when content fits, scrolling layout otherwise. The
+    // cockpit never packs: its composer stays pinned to the bottom of `main`.
     let use_packed = terminal_clear_collapsed
         || (!swarm_page_active
             && !side_panel_fullscreen
+            && cockpit.is_none()
             && content_height.saturating_add(fixed_height) <= available_height);
 
     // Layout: messages (includes header), queued, status, notification, inline UI, gap, input, donut
@@ -3302,6 +3331,12 @@ fn draw_inner(frame: &mut Frame, app: &dyn TuiState) {
         })
         .split(chat_area);
     record_status_area(chunks[3]);
+    // The composer text area: inside the rounded box in the cockpit.
+    let input_area = if cockpit.is_some() {
+        chunks[7].inner(ratatui::layout::Margin::new(2, 1))
+    } else {
+        chunks[7]
+    };
 
     // Draw the inline swarm strip directly above the status line if present.
     if swarm_strip_height > 0 {
@@ -3377,7 +3412,21 @@ fn draw_inner(frame: &mut Frame, app: &dyn TuiState) {
     let draw_start = Instant::now();
 
     // Messages area is chunks[0] within the chat column (already excludes diagram).
-    let messages_area = chunks[0];
+    // The cockpit bottom-anchors a short transcript right above the composer,
+    // like a chat, instead of leaving an empty band under it.
+    let messages_area = if cockpit.is_some()
+        && !terminal_clear_collapsed
+        && content_height > 0
+        && content_height < chunks[0].height
+    {
+        Rect {
+            y: chunks[0].bottom() - content_height,
+            height: content_height,
+            ..chunks[0]
+        }
+    } else {
+        chunks[0]
+    };
     let diff_pane_area = if side_panel_fullscreen {
         Some(messages_area)
     } else {
@@ -3399,7 +3448,7 @@ fn draw_inner(frame: &mut Frame, app: &dyn TuiState) {
         capture.layout.messages_area = Some(messages_area.into());
         capture.layout.diagram_area = diagram_area.map(|r| r.into());
     }
-    record_layout_snapshot(messages_area, diagram_area, diff_pane_area, Some(chunks[7]));
+    record_layout_snapshot(messages_area, diagram_area, diff_pane_area, Some(input_area));
 
     let mut chat_scrollbar: Option<NativeScrollbar> = None;
     let margins = if onboarding_welcome {
@@ -3469,6 +3518,19 @@ fn draw_inner(frame: &mut Frame, app: &dyn TuiState) {
             if let Some(ref mut capture) = debug_capture {
                 capture.render_order.push("draw_corner_sprite".to_string());
             }
+        }
+    }
+    if let Some(rects) = cockpit {
+        let snap = cockpit::token_snapshot(app);
+        cockpit::draw_header(frame.buffer_mut(), rects.header, app);
+        cockpit::draw_footer(frame.buffer_mut(), rects.footer, &snap);
+        if let Some(sidebar) = rects.sidebar {
+            cockpit::draw_sidebar(frame, app, sidebar, &snap);
+        } else {
+            cockpit::record_agent_hit_rows(Vec::new());
+        }
+        if let Some(ref mut capture) = debug_capture {
+            capture.render_order.push("draw_cockpit".to_string());
         }
     }
     // Render pinned diagram if we have one
@@ -3554,13 +3616,39 @@ fn draw_inner(frame: &mut Frame, app: &dyn TuiState) {
         draw_inline_ui(frame, app, chunks[5]);
     }
 
+    if cockpit.is_some() && chunks[7].height >= 3 && chunks[7].width >= 3 {
+        let block = ratatui::widgets::Block::default()
+            .borders(ratatui::widgets::Borders::ALL)
+            .border_type(ratatui::widgets::BorderType::Rounded)
+            .border_style(Style::default().fg(cockpit::border_color()));
+        frame.render_widget(block, chunks[7]);
+    }
     let _input_cursor = input_ui::draw_input(
         frame,
         app,
-        chunks[7],
+        input_area,
         user_count + pending_count + 1,
         &mut debug_capture,
     );
+    if cockpit.is_some()
+        && app.input().is_empty()
+        && app.login_input_hint().is_none()
+        && let Some(cursor) = _input_cursor
+        && cursor.x < input_area.right()
+    {
+        let reserved = input_ui::send_mode_reserved_width(app) as u16;
+        let max = input_area
+            .right()
+            .saturating_sub(reserved)
+            .saturating_sub(cursor.x);
+        frame.buffer_mut().set_stringn(
+            cursor.x,
+            cursor.y,
+            welcome::PLACEHOLDER,
+            max as usize,
+            Style::default().fg(dim_color()),
+        );
+    }
 
     if overscroll_height > 0 {
         input_ui::draw_overscroll_status(frame, app, chunks[8]);
@@ -3590,6 +3678,10 @@ fn draw_inner(frame: &mut Frame, app: &dyn TuiState) {
         placements = info_widget::calculate_placements(widget_bounds, &margins, &widget_data);
         if let Some(rect) = corner_rect {
             placements.retain(|placement| !rects_overlap(placement.rect, rect));
+        }
+        if cockpit.is_some() {
+            // The sidebar tokens card replaces the Overview box.
+            placements.retain(|placement| placement.kind != info_widget::WidgetKind::Overview);
         }
 
         if let Some(ref mut capture) = debug_capture {
