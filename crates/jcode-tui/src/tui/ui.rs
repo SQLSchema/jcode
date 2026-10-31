@@ -79,6 +79,8 @@ mod messages;
 mod onboarding;
 #[path = "ui_welcome.rs"]
 pub(crate) mod welcome;
+#[path = "ui_cockpit.rs"]
+pub(crate) mod cockpit;
 mod output_style;
 #[path = "ui_overlays.rs"]
 mod overlays;
