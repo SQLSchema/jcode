@@ -24,7 +24,7 @@ use std::sync::OnceLock;
 use unicode_width::UnicodeWidthStr;
 
 /// Sprite sheet frame rate (matches `welcome_assets/sprite.json`).
-const SPRITE_FPS: f32 = 12.0;
+pub(crate) const SPRITE_FPS: f32 = 12.0;
 /// Frames per sheet (matches `welcome_assets/sprite.json`).
 const SPRITE_FRAMES: usize = 7;
 /// Frame edge length in pixels for each embedded sheet, biggest first.

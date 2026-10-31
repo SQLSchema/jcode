@@ -82,15 +82,35 @@ fn idle_donut_active_with_policy(
 
     // The hero welcome sprite is the fork's default fresh-session look and is
     // animated independently of the opt-in classic donut setting.
-    let animation_configured =
-        crate::config::config().display.idle_animation || ui::welcome::welcome_hero_wanted(state);
-    policy.enable_decorative_animations
+    let hero = ui::welcome::welcome_hero_wanted(state);
+    let animation_configured = crate::config::config().display.idle_animation || hero;
+    // Windows Terminal / cmd / conhost turn decorative animation off because the
+    // full-screen 3D donut is expensive through ConPTY. The sprite is a small
+    // pre-rendered rect repainted on the partial-repaint fast path at 12fps, so
+    // it stays on there unless the machine is in the Minimal perf tier.
+    let decorative_allowed = policy.enable_decorative_animations
+        || (hero && windows_console_family() && policy.tier.animations_enabled());
+    decorative_allowed
         && animation_configured
-        && policy.tier.idle_animation_enabled()
+        && (policy.tier.idle_animation_enabled() || hero)
         && !has_started_conversation(state)
         && !state.is_processing()
         && state.streaming_text().is_empty()
         && state.queued_messages().is_empty()
+}
+
+/// Terminals where jcode disables decorative animation by policy (Windows
+/// Terminal / cmd / conhost, and WSL). The sprite is cheap enough to keep there.
+fn windows_console_family() -> bool {
+    let profile = crate::perf::profile();
+    profile.is_wsl || profile.is_windows_terminal_family()
+}
+
+/// Cadence for the hero sprite: its own frame rate, independent of the
+/// policy's `animation_fps` (which is forced to 1 when decorative animation is
+/// off by terminal policy).
+fn hero_sprite_interval() -> Duration {
+    fps_to_duration(ui::welcome::SPRITE_FPS as u32)
 }
 
 /// Whether the transcript contains any real conversation yet (a user prompt or
@@ -464,6 +484,9 @@ pub(crate) fn redraw_interval_with_policy_and_animation(
         // keystrokes, and return to full smoothness as soon as typing pauses.
         if actively_composing(state) {
             return REDRAW_IDLE;
+        }
+        if ui::welcome::welcome_hero_wanted(state) {
+            return hero_sprite_interval();
         }
         return match policy.tier {
             crate::perf::PerformanceTier::Minimal => fast_interval,
