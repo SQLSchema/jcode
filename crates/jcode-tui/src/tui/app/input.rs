@@ -3267,6 +3267,12 @@ impl App {
         // pre-resize offset, which looks like the view jumping up and sliding
         // back down (issue #1412). Snap to the new bottom on the next frame.
         crate::tui::ui::request_tail_follow_snap();
+        // Windows conhost / Windows Terminal reflow and keep stale cells on a
+        // resize, so ratatui's diff (which assumes the screen still matches its
+        // previous buffer) leaves ghost glyphs and smeared backgrounds behind,
+        // especially from the half-block sprite. Clear and re-emit every cell
+        // once per resize; it is a single frame, not a per-tick cost.
+        self.request_full_redraw();
         true
     }
 
