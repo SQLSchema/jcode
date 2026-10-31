@@ -45,6 +45,7 @@ include!("tests/resize_anchor.rs");
 include!("tests/input_copy_selection.rs");
 include!("tests/onboarding_flow.rs");
 include!("tests/onboarding_golden.rs");
+include!("tests/cockpit_app_render.rs");
 include!("tests/onboarding_eval.rs");
 include!("tests/onboarding_sim.rs");
 include!("tests/reasoning_region.rs");
