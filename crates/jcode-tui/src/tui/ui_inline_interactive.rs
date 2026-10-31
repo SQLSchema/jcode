@@ -643,6 +643,29 @@ pub(super) fn draw_inline_interactive(frame: &mut Frame, app: &dyn TuiState, are
     max_via_len = max_via_len.max(3);
 
     let content_width = picker_render_width(picker, width.saturating_sub(2)).max(1);
+    // The header carries the typed filter and the match count. When the list
+    // narrows to a few short names the rows alone would shrink the box until
+    // the filter text is clipped, which reads as "typing does nothing". Keep
+    // the box at least wide enough for the header line.
+    let header_min = {
+        // Mirror the header layout below: marker + first column, then the
+        // padded provider / action columns (floors 8 and 6), then the quoted
+        // filter and the match count.
+        let provider_col = (max_provider_len + 1).max(8);
+        let via_col = (max_via_len + 1).max(6);
+        let first_col = display_width(picker.primary_label())
+            .max(max_model_len.min(16))
+            + 1;
+        let labels = marker_width + first_col + provider_col + via_col + 1;
+        let filter = if picker.filter.is_empty() {
+            0
+        } else {
+            display_width(&picker.filter) + 4
+        };
+        let count = format!(" ({}/{})", filtered_count, total).len();
+        labels + filter + count
+    };
+    let content_width = content_width.max(header_min.min(width.saturating_sub(2)));
     let outer_width = content_width.saturating_add(2).min(width);
     let horizontal_offset = if app.centered_mode() {
         area.width.saturating_sub(outer_width as u16) / 2
@@ -720,6 +743,24 @@ pub(super) fn draw_inline_interactive(frame: &mut Frame, app: &dyn TuiState, are
     let account_state_width = (max_account_state_len + 1).clamp(7, 10);
     let account_title_width = width.saturating_sub(marker_width + account_state_width);
     let model_width = width.saturating_sub(marker_width + provider_width + via_width);
+    // The quoted filter and match count live in whatever the header leaves
+    // after the last column label. The name column normally absorbs all spare
+    // width, which can push the filter past the border (typing then looks
+    // like it does nothing). Give back just enough of the name column, never
+    // below the longest visible name.
+    let model_width = if !is_account_picker && !picker.filter.is_empty() {
+        let third = display_width(picker.header_layout(is_preview).0[2]) + 1;
+        let leftover = via_width.saturating_sub(third);
+        let meta = display_width(&picker.filter)
+            + 4
+            + format!(" ({}/{})", filtered_count, total).len();
+        let floor = max_model_len
+            .max(display_width(picker.primary_label()))
+            .saturating_add(1);
+        model_width.saturating_sub(meta.saturating_sub(leftover)).max(floor.min(model_width))
+    } else {
+        model_width
+    };
 
     let (col_labels, col_logical) = picker.header_layout(is_preview);
     let col_widths: [usize; 3] = if is_account_picker {

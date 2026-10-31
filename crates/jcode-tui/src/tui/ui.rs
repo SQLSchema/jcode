@@ -3099,7 +3099,11 @@ fn draw_inner(frame: &mut Frame, app: &dyn TuiState) {
     // normal chat chrome (status line, input box, notification, idle hint) so the
     // screen stays focused and the donut gets the full height. The resting
     // Suggestions screen keeps the input box so the user can type to start.
+    // An open inline picker (the provider list opened from the sign-in screen
+    // or the recovery screen) must stay visible: the picker owns the keys, so
+    // hiding it behind the welcome body left typed filter text invisible.
     let onboarding_takes_over = onboarding_welcome
+        && app.inline_interactive_state().is_none()
         && !matches!(
             app.onboarding_welcome_kind(),
             crate::tui::OnboardingWelcomeKind::Suggestions

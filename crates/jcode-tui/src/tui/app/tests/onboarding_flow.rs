@@ -532,6 +532,37 @@ fn login_choice_api_key_and_local_rows_narrow_the_picker() {
 }
 
 #[test]
+fn login_choice_picker_is_drawn_over_onboarding_with_typed_filter() {
+    // Regression: the picker opened from onboarding was alive (keys reached
+    // it) but the welcome body was drawn instead, so typing looked dead.
+    // Render the REAL full frame and look for the picker and the typed text.
+    use ratatui::{Terminal, backend::TestBackend};
+    with_temp_jcode_home(|| {
+        let mut app = create_test_app();
+        app.onboarding_flow = None;
+        app.begin_onboarding_flow_at_login();
+        assert!(app.handle_onboarding_continue_prompt_key(KeyCode::Char('4')));
+        for c in "groq".chars() {
+            app.handle_key(KeyCode::Char(c), KeyModifiers::empty()).unwrap();
+        }
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+        terminal
+            .draw(|frame| crate::tui::ui::draw(frame, &app as &dyn crate::tui::TuiState))
+            .unwrap();
+        let buf = terminal.backend().buffer();
+        let text: String = (0..40u16)
+            .map(|y| (0..120u16).map(|x| buf[(x, y)].symbol()).collect::<String>() + "\n")
+            .collect();
+        assert!(text.contains("Groq"), "picker row not drawn:\n{text}");
+        // The picker header shows the typed filter and the narrowed count.
+        assert!(
+            text.lines().any(|l| l.contains("\"groq\"") && l.contains("(1/")),
+            "typed filter not visible in the picker header:\n{text}"
+        );
+    });
+}
+
+#[test]
 fn login_choice_reuse_logins_without_detected_logins_stays_on_list() {
     with_temp_jcode_home(|| {
         let mut app = create_test_app();
