@@ -182,6 +182,27 @@ pub enum DiagramDisplayMode {
     Pinned,
 }
 
+/// Look of a fresh session before the first message is sent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WelcomeStyle {
+    /// Centered hero: animated pixel sprite, block logo, bounded composer.
+    #[default]
+    Hero,
+    /// Original jcode empty-session layout (header, optional idle donut).
+    Classic,
+}
+
+impl WelcomeStyle {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "hero" => Some(Self::Hero),
+            "classic" | "off" | "none" => Some(Self::Classic),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum DiagramPanePosition {

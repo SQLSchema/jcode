@@ -212,6 +212,10 @@ latex_rendering = "image"
 # Show idle animation before first prompt (default: false)
 idle_animation = false
 
+# Fresh-session look: "hero" (animated sprite, logo, centered composer) or
+# "classic" (original header layout and optional idle donut). Default: hero
+# welcome_style = "hero"
+
 # Briefly animate a user prompt line when it enters the viewport (default: true)
 prompt_entry_animation = true
 

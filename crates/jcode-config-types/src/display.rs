@@ -2,7 +2,7 @@
 
 use crate::{
     DiagramDisplayMode, DiffDisplayMode, LatexRenderingMode, MarkdownSpacingMode,
-    NativeScrollbarConfig, ReasoningDisplayMode, default_true,
+    NativeScrollbarConfig, ReasoningDisplayMode, WelcomeStyle, default_true,
 };
 use serde::{Deserialize, Serialize};
 
@@ -59,6 +59,10 @@ pub struct DisplayConfig {
     pub pin_todos: bool,
     /// Show idle animation before first prompt (default: false)
     pub idle_animation: bool,
+    /// Fresh-session look: "hero" (animated sprite + logo, default) or
+    /// "classic" (original header layout and optional idle donut).
+    #[serde(deserialize_with = "crate::serde_lenient::lenient_enum")]
+    pub welcome_style: WelcomeStyle,
     /// Briefly animate user prompt line when it enters viewport (default: true)
     pub prompt_entry_animation: bool,
     /// Disable specific animation variants by name (e.g. ["donut", "orbit_rings"])
@@ -152,6 +156,7 @@ impl Default for DisplayConfig {
             markdown_spacing: MarkdownSpacingMode::default(),
             latex_rendering: LatexRenderingMode::default(),
             idle_animation: false,
+            welcome_style: WelcomeStyle::default(),
             prompt_entry_animation: true,
             disabled_animations: Vec::new(),
             performance: String::new(),
@@ -273,6 +278,19 @@ mod tests {
         let disabled: DisplayConfig =
             serde_json::from_str(r#"{"pin_todos":false}"#).expect("display config");
         assert!(!disabled.pin_todos);
+    }
+
+    #[test]
+    fn welcome_style_defaults_to_hero_and_accepts_classic() {
+        use crate::WelcomeStyle;
+        assert_eq!(DisplayConfig::default().welcome_style, WelcomeStyle::Hero);
+        let missing: DisplayConfig = serde_json::from_str("{}").unwrap();
+        assert_eq!(missing.welcome_style, WelcomeStyle::Hero);
+        let classic: DisplayConfig =
+            serde_json::from_str(r#"{"welcome_style":"classic"}"#).unwrap();
+        assert_eq!(classic.welcome_style, WelcomeStyle::Classic);
+        let bogus: DisplayConfig = serde_json::from_str(r#"{"welcome_style":"x"}"#).unwrap();
+        assert_eq!(bogus.welcome_style, WelcomeStyle::Hero);
     }
 
     #[test]
