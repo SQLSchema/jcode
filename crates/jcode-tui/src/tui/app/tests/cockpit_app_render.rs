@@ -55,12 +55,14 @@ fn cockpit_renders_from_real_app_state_at_fullscreen() {
         .collect();
     let text = rows.join("\n");
 
-    // Header from real App accessors: wordmark, session, short dir, branch.
-    let header = &rows[0];
-    assert!(header.contains("C Y B E R P U N K"), "{header}");
-    assert!(header.contains("sloth"), "session name missing: {header}");
-    assert!(header.contains("jcode"), "short dir missing: {header}");
-    assert!(header.contains("cracked-welcome"), "branch missing: {header}");
+    // Header from real App accessors: 2-row block wordmark at full screen,
+    // model + session on the first/second row, short dir + branch on the right.
+    let big = crate::tui::ui::cockpit::WORDMARK_BIG;
+    assert!(rows[0].contains(big[0]) && rows[1].contains(big[1]), "{}\n{}", rows[0], rows[1]);
+    let header = format!("{}\n{}", rows[0], rows[1]);
+    assert!(rows[1].contains("sloth"), "session name missing: {header}");
+    assert!(rows[0].contains("jcode"), "short dir missing: {header}");
+    assert!(rows[1].contains("cracked-welcome"), "branch missing: {header}");
     // No full path, no jcode header block, no changelog box.
     assert!(!text.contains("C:\\") && !text.contains("Users"), "{text}");
     assert!(!text.contains("Account router") && !text.contains("Updates"), "{text}");

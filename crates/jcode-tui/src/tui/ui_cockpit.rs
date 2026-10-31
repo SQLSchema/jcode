@@ -1,6 +1,7 @@
 //! "Cockpit" chat layout for the cracked fork.
 //!
-//! Once a conversation starts, the chat column gets a one-row brand header,
+//! Once a conversation starts, the chat column gets a brand header (2-row
+//! block wordmark when there is room),
 //! a right sidebar (animated sprite, tokens card, agents card), a rounded
 //! composer and a footer. Shapes match the welcome hero so the two screens
 //! read as one app.
@@ -39,7 +40,8 @@ pub(crate) const COCKPIT_MIN_HEIGHT: u16 = 16;
 /// to [`cockpit_layout`]. `sidebar` is `None` on narrow terminals.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct CockpitRects {
-    /// One-row brand header across the full width.
+    /// Brand header across the full width: 2 rows (big wordmark) when there
+    /// is room, else 1 row (see [`header_rows`]).
     pub header: Rect,
     /// Transcript + composer column (left of the sidebar).
     pub main: Rect,
@@ -55,9 +57,10 @@ pub(crate) fn cockpit_layout(area: Rect) -> Option<CockpitRects> {
     if area.width < COCKPIT_MIN_WIDTH || area.height < COCKPIT_MIN_HEIGHT {
         return None;
     }
-    let header = Rect::new(area.x, area.y, area.width, 1);
+    let tall = header_rows(area);
+    let header = Rect::new(area.x, area.y, area.width, tall);
     let footer = Rect::new(area.x, area.bottom() - 1, area.width, 1);
-    let body = Rect::new(area.x, area.y + 1, area.width, area.height - 2);
+    let body = Rect::new(area.x, area.y + tall, area.width, area.height - tall - 1);
     if area.width >= SIDEBAR_MIN_TOTAL_WIDTH {
         let width = sidebar_width(area.width);
         let main = Rect::new(body.x, body.y, body.width - width, body.height);
@@ -67,6 +70,20 @@ pub(crate) fn cockpit_layout(area: Rect) -> Option<CockpitRects> {
         Some(CockpitRects { header, main: body, sidebar: None, footer })
     }
 }
+
+/// Header height for a chat area: the 2-row block wordmark needs some width
+/// and should not eat a short terminal's transcript.
+pub(crate) fn header_rows(area: Rect) -> u16 {
+    if area.width >= BIG_WORDMARK_MIN_WIDTH && area.height >= BIG_WORDMARK_MIN_HEIGHT {
+        2
+    } else {
+        1
+    }
+}
+
+/// Narrowest / shortest chat area that gets the 2-row block wordmark.
+const BIG_WORDMARK_MIN_WIDTH: u16 = 90;
+const BIG_WORDMARK_MIN_HEIGHT: u16 = 24;
 
 /// Whether the cockpit layout is wanted for this state (hero style active,
 /// cockpit enabled in config, conversation started). Layout may still fall
@@ -133,6 +150,31 @@ const GRAD_FROM: (u8, u8, u8) = (0x3d, 0x5a, 0xfe);
 const GRAD_TO: (u8, u8, u8) = (0xb4, 0xc0, 0xff);
 const WORDMARK: &str = "C Y B E R P U N K";
 const WORDMARK_SHORT: &str = "CYBERPUNK";
+/// Two-row half-block wordmark for the tall header (same name, bigger).
+pub(crate) const WORDMARK_BIG: [&str; 2] = [
+    "█▀▀ █▄█ █▄▄ █▀▀ █▀█ █▀█ █ █ █▄ █ █▄▀",
+    "█▄▄  █  █▄█ ██▄ █▀▄ █▀▀ █▄█ █ ▀█ █ █",
+];
+
+/// Draw [`WORDMARK_BIG`] at `(x, y)` in the brand gradient. Returns its width.
+fn draw_big_wordmark(buf: &mut Buffer, x: u16, y: u16) -> u16 {
+    let width = WORDMARK_BIG.iter().map(|row| text_width(row)).max().unwrap_or(0);
+    let style = Style::default().add_modifier(Modifier::BOLD);
+    for (dy, row) in WORDMARK_BIG.iter().enumerate() {
+        for (dx, ch) in row.chars().enumerate() {
+            if ch == ' ' {
+                continue;
+            }
+            let t = dx as f32 / width.saturating_sub(1).max(1) as f32;
+            // Slight diagonal like the hero logo: the bottom row runs brighter.
+            let color = gradient(t * 0.85 + dy as f32 * 0.15);
+            buf[(x + dx as u16, y + dy as u16)]
+                .set_char(ch)
+                .set_style(style.fg(color));
+        }
+    }
+    width
+}
 
 fn gradient(t: f32) -> Color {
     let t = t.clamp(0.0, 1.0);
@@ -221,8 +263,10 @@ fn compact_version(version: &str) -> String {
     }
 }
 
-/// One-row brand header: gradient wordmark · model · session on the left,
-/// `<short_dir> · <branch>` on the right. Never shows a full path.
+/// Brand header. Two rows when there is room: the block wordmark, then model
+/// over session (left) and dir over branch (right). Otherwise one row:
+/// spaced wordmark · model · session, `<short_dir> · <branch>` on the right.
+/// Never shows a full path.
 pub(crate) fn draw_header(buf: &mut Buffer, area: Rect, app: &dyn TuiState) {
     let area = area.intersection(*buf.area());
     if area.is_empty() {
@@ -242,6 +286,48 @@ pub(crate) fn draw_header(buf: &mut Buffer, area: Rect, app: &dyn TuiState) {
         .map(|dir| short_dir(&dir))
         .filter(|dir| !dir.is_empty());
     let branch = app.git_branch().filter(|b| !b.trim().is_empty());
+
+    // Tall header: the 2-row block wordmark, with model over session on the
+    // left and dir over branch on the right.
+    let big_w = WORDMARK_BIG.iter().map(|row| text_width(row)).max().unwrap_or(0);
+    if area.height >= 2 && area.width >= big_w + 30 {
+        let mark_end = area.x + 1 + draw_big_wordmark(buf, area.x + 1, area.y);
+        let model_style = Style::default()
+            .fg(model_color())
+            .add_modifier(Modifier::BOLD);
+        let rows: [(Option<(String, Style)>, Option<(String, Style)>); 2] = [
+            (
+                model.map(|m| (m, model_style)),
+                dir.map(|d| (d, Style::default().fg(model_color()))),
+            ),
+            (
+                session.map(|s| (s, dim)),
+                branch.map(|b| (truncate_end(&b, 28), dim)),
+            ),
+        ];
+        let left_x = mark_end + 3;
+        let max_x = area.right().saturating_sub(1);
+        for (dy, (left, right)) in rows.into_iter().enumerate() {
+            let y = area.y + dy as u16;
+            let right_w = right.as_ref().map_or(0, |(text, _)| text_width(text));
+            let room = max_x.saturating_sub(left_x);
+            // Right side keeps at most half the room; left side gets the rest.
+            let right_room = right_w.min(room / 2);
+            if let Some((text, style)) = left {
+                let left_room = room.saturating_sub(right_room + u16::from(right_room > 0) * 2);
+                let text = truncate_end(&text, left_room as usize);
+                buf.set_stringn(left_x, y, &text, left_room as usize, style);
+            }
+            if let Some((text, style)) = right
+                && right_room > 0
+            {
+                let text = truncate_end(&text, right_room as usize);
+                let x = max_x.saturating_sub(text_width(&text));
+                buf.set_stringn(x, y, &text, right_room as usize, style);
+            }
+        }
+        return;
+    }
 
     let mut right: Vec<Span<'static>> = Vec::new();
     if let Some(dir) = dir {
@@ -828,13 +914,20 @@ mod tests {
     fn layout_splits_sidebar_only_when_wide() {
         let wide = cockpit_layout(Rect::new(0, 0, 140, 40)).unwrap();
         let sidebar = wide.sidebar.unwrap();
-        assert_eq!(wide.header.height, 1);
+        assert_eq!(wide.header.height, 2, "big wordmark header at 140x40");
+        assert_eq!(wide.main.y, 2);
         assert_eq!(wide.footer.y, 39);
+        assert_eq!(wide.main.bottom(), wide.footer.y);
         assert_eq!(wide.main.right(), sidebar.x);
         assert_eq!(sidebar.right(), 140);
-        let narrow = cockpit_layout(Rect::new(0, 0, 90, 30)).unwrap();
+        // Short terminals keep the 1-row header so the transcript keeps its rows.
+        let short = cockpit_layout(Rect::new(0, 0, 140, 20)).unwrap();
+        assert_eq!(short.header.height, 1);
+        assert_eq!(short.main.y, 1);
+        let narrow = cockpit_layout(Rect::new(0, 0, 80, 30)).unwrap();
+        assert_eq!(narrow.header.height, 1);
         assert!(narrow.sidebar.is_none());
-        assert_eq!(narrow.main.width, 90);
+        assert_eq!(narrow.main.width, 80);
         assert!(cockpit_layout(Rect::new(0, 0, 50, 30)).is_none());
         assert!(cockpit_layout(Rect::new(0, 0, 120, 10)).is_none());
     }

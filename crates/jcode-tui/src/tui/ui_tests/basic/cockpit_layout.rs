@@ -50,9 +50,22 @@ fn assert_cockpit_contract(width: u16, height: u16) -> Terminal<TestBackend> {
     let rects = crate::tui::ui::cockpit::cockpit_layout(Rect::new(0, 0, width, height))
         .expect("cockpit at this size");
 
-    // Header: wordmark + short dir, no full path anywhere.
-    let header = text.lines().next().unwrap_or("");
-    assert!(header.contains("CYBERPUNK") || header.contains("C Y B E R P U N K"), "{header:?}");
+    // Header: wordmark + short dir, no full path anywhere. The header is 2
+    // rows (block wordmark) on roomy terminals, 1 row otherwise.
+    let header: String = text
+        .lines()
+        .take(rects.header.height as usize)
+        .collect::<Vec<_>>()
+        .join("\n");
+    let big = crate::tui::ui::cockpit::WORDMARK_BIG;
+    if rects.header.height == 2 {
+        assert!(header.contains(big[0]) && header.contains(big[1]), "{header}");
+    } else {
+        assert!(
+            header.contains("CYBERPUNK") || header.contains("C Y B E R P U N K"),
+            "{header:?}"
+        );
+    }
     assert!(header.contains("jcode"), "short dir missing: {header:?}");
     assert_no_full_path(&text);
     // jcode's persistent multi-line header is gone.

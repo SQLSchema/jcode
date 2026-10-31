@@ -362,8 +362,8 @@ fn corner_sprite_stays_top_right_after_first_message() {
         crate::tui::ui::IdleAnimationKind::WelcomeSprite(_)
     ));
     // Top-right of the terminal: since the cockpit, the sprite sits at the top
-    // of the right sidebar (under the one-row brand header).
-    assert!(area.y <= 2, "{area:?}");
+    // of the right sidebar (under the brand header, 1 or 2 rows).
+    assert!(area.y <= 3, "{area:?}");
     assert!(area.right() >= 120 - 4 && area.right() <= 120, "{area:?}");
     let buf = terminal.backend().buffer();
     assert!(
