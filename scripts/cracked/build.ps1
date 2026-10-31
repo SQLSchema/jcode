@@ -65,12 +65,23 @@ try {
         }
     }
     New-Item -ItemType Directory -Path $installDir -Force | Out-Null
-    # Stage before replacement. Windows will refuse replacement if cracked.exe
-    # is running. Do not kill processes, especially the stock jcode server.
+    # Stage before replacement. Windows refuses to overwrite cracked.exe while
+    # it runs, but does allow renaming it, so a running copy is moved aside to
+    # cracked.old-*.exe (cleaned up on later builds once it has exited). Never
+    # kill processes, especially the stock jcode server.
+    Get-ChildItem -LiteralPath $installDir -Filter 'cracked.old-*.exe' -ErrorAction SilentlyContinue |
+        ForEach-Object { Remove-Item -LiteralPath $_.FullName -ErrorAction SilentlyContinue }
     $stagedExe = Join-Path $installDir ('cracked-' + [Guid]::NewGuid().ToString('N') + '.exe')
     try {
         Copy-Item -LiteralPath $artifactPath -Destination $stagedExe
-        Move-Item -LiteralPath $stagedExe -Destination $installExe -Force
+        try {
+            Move-Item -LiteralPath $stagedExe -Destination $installExe -Force -ErrorAction Stop
+        } catch [System.IO.IOException] {
+            $aside = Join-Path $installDir ('cracked.old-' + [Guid]::NewGuid().ToString('N').Substring(0, 8) + '.exe')
+            Rename-Item -LiteralPath $installExe -NewName (Split-Path -Leaf $aside) -ErrorAction Stop
+            Move-Item -LiteralPath $stagedExe -Destination $installExe -ErrorAction Stop
+            Write-Host "cracked.exe was running: old copy moved aside; restart open windows to pick up the new build."
+        }
     } finally {
         if (Test-Path -LiteralPath $stagedExe) { Remove-Item -LiteralPath $stagedExe }
     }
