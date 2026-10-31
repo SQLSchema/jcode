@@ -1078,6 +1078,152 @@ impl crate::tui::TuiState for App {
         self.remote_total_tokens
     }
 
+    // ---- Cockpit tokens ----
+    fn cockpit_token_data(&self) -> Option<crate::tui::info_widget::InfoWidgetData> {
+        use crate::tui::info_widget::{AuthMethod, CacheHitInfo, InfoWidgetData, UsageInfo, UsageProvider};
+        // Unlike info_widget_data(), this path never gathers git, diagrams,
+        // background tasks, or context transcripts, and never refreshes usage.
+        let remote = self.is_remote || self.is_replay_runtime();
+        let route = WidgetRouteInfo {
+            provider: WidgetProviderKind::from_provider_key(if remote {
+                self.remote_provider_name.as_deref()
+            } else {
+                Some(self.provider.name())
+            }),
+            is_remote: remote,
+        };
+        let auth_method = self.widget_auth_method(route);
+        let metered = matches!(auth_method, AuthMethod::ApiKey | AuthMethod::AnthropicApiKey
+            | AuthMethod::OpenAIApiKey | AuthMethod::OpenRouterApiKey | AuthMethod::OpenCodeApiKey)
+            || (remote && matches!(route.provider, WidgetProviderKind::OpenRouter
+                | WidgetProviderKind::OpenCode | WidgetProviderKind::CostBasedApiKey));
+        let history = self.remote_total_tokens.unwrap_or_default();
+        // Remote events already accrue per-call deltas into accounting. Local
+        // mode only rolls its live counters into accounting in finish_turn().
+        let live = if !remote && self.is_processing {
+            (self.streaming.streaming_input_tokens, self.streaming.streaming_output_tokens)
+        } else { (0, 0) };
+        let input = history.0.saturating_add(self.token_accounting.total_input_tokens)
+            .saturating_add(live.0);
+        let output = history.1.saturating_add(self.token_accounting.total_output_tokens)
+            .saturating_add(live.1);
+        let mut usage = UsageInfo {
+            provider: if metered { UsageProvider::CostBased } else { UsageProvider::Copilot },
+            input_tokens: input,
+            output_tokens: output,
+            total_cost: self.cost.total_cost,
+            available: self.remote_total_tokens.is_some() || input > 0 || output > 0,
+            ..Default::default()
+        };
+        let quota_provider = match auth_method {
+            AuthMethod::AnthropicOAuth => Some((UsageProvider::Anthropic,
+                crate::usage::MultiAccountProviderKind::Anthropic)),
+            AuthMethod::OpenAIOAuth => Some((UsageProvider::OpenAI,
+                crate::usage::MultiAccountProviderKind::OpenAI)),
+            _ => None,
+        };
+        if let Some((provider, kind)) = quota_provider {
+            usage.provider = provider;
+            if let Some(snapshot) = remote_oauth_account_label(
+                self.remote_provider_oauth_account_label.as_deref(),
+                self.session.route_api_method.as_deref(),
+            ).and_then(|label| crate::usage::cached_account_usage_snapshot(kind, label)) {
+                usage.primary_limit_label = snapshot.five_hour_ratio
+                    .map(|_| snapshot.primary_label.unwrap_or_else(|| "5-hour".into()));
+                usage.secondary_limit_label = snapshot.seven_day_ratio
+                    .map(|_| snapshot.secondary_label.unwrap_or_else(|| "7-day".into()));
+                usage.five_hour = snapshot.five_hour_ratio.unwrap_or_default();
+                usage.seven_day = snapshot.seven_day_ratio.unwrap_or_default();
+                usage.available = true;
+            }
+        }
+        let history_cache = self.remote_token_usage_totals;
+        let history_has_cache = history_cache.is_some_and(|usage| {
+            usage.cache_prompt_tokens.is_some() || usage.cache_reported_input_tokens > 0
+                || usage.cache_read_input_tokens > 0 || usage.cache_creation_input_tokens > 0
+        });
+        let cache_hit_info = (history_has_cache
+            || self.token_accounting.total_cache_prompt_tokens > 0).then(|| CacheHitInfo {
+                read_tokens: history_cache.map_or(0, |usage| usage.cache_read_input_tokens)
+                    .saturating_add(self.token_accounting.total_cache_read_tokens),
+                creation_tokens: history_cache.map_or(0, |usage| usage.cache_creation_input_tokens)
+                    .saturating_add(self.token_accounting.total_cache_creation_tokens),
+                ..Default::default()
+            });
+        Some(InfoWidgetData {
+            observed_context_tokens: self.current_stream_context_tokens(),
+            context_limit: (self.context_limit > 0).then_some(self.context_limit as usize),
+            cache_hit_info,
+            usage_info: Some(usage),
+            auth_method,
+            ..Default::default()
+        })
+    }
+
+    fn cockpit_swarm_token_totals(&self) -> Option<(usize, Option<u64>, Option<u64>)> {
+        use std::hash::{Hash, Hasher};
+        // Cache only member indices, never cloned output tails/todos. Topology
+        // changes rebuild the small index. Runtime counter changes need no
+        // invalidation and the ordinary frame path allocates nothing.
+        thread_local! {
+            static MEMBERSHIP: RefCell<Option<(u64, Vec<usize>)>> = const { RefCell::new(None) };
+        }
+        let members = &self.remote_swarm_members;
+        if members.is_empty() || (!self.swarm_enabled && !self.debug_force_inline_gallery) {
+            return Some((0, None, None));
+        }
+        let root = if self.debug_force_inline_gallery {
+            None
+        } else if self.is_remote {
+            let Some(id) = self.remote_session_id.as_deref() else {
+                return Some((0, None, None));
+            };
+            Some(id)
+        } else {
+            Some(self.session.id.as_str())
+        };
+        let mut hash = std::collections::hash_map::DefaultHasher::new();
+        root.hash(&mut hash);
+        for member in members {
+            member.session_id.hash(&mut hash);
+            member.report_back_to_session_id.hash(&mut hash);
+        }
+        let key = hash.finish();
+        Some(MEMBERSHIP.with(|slot| {
+            let mut slot = slot.borrow_mut();
+            if slot.as_ref().is_none_or(|(cached, _)| *cached != key) {
+                let indices = if let Some(root) = root {
+                    let mut descendants = std::collections::HashSet::new();
+                    let mut pending = vec![root];
+                    while let Some(parent) = pending.pop() {
+                        for member in members {
+                            let id = member.session_id.as_str();
+                            if member.report_back_to_session_id.as_deref() == Some(parent)
+                                && id != root && descendants.insert(id) {
+                                pending.push(id);
+                            }
+                        }
+                    }
+                    members.iter().enumerate().filter_map(|(index, member)| {
+                        descendants.contains(member.session_id.as_str()).then_some(index)
+                    }).collect()
+                } else {
+                    (0..members.len()).collect()
+                };
+                *slot = Some((key, indices));
+            }
+            let indices = &slot.as_ref().expect("membership populated").1;
+            let mut context = Some(0u64);
+            let mut output = Some(0u64);
+            for &index in indices {
+                let runtime = &members[index].runtime;
+                context = context.zip(runtime.context_tokens).map(|(sum, value)| sum.saturating_add(value));
+                output = output.zip(runtime.output_tokens).map(|(sum, value)| sum.saturating_add(value));
+            }
+            (indices.len(), context, output)
+        }))
+    }
+
     fn session_compaction_count(&self) -> usize {
         if self.is_remote || !self.provider.uses_jcode_compaction() {
             return 0;
@@ -2077,6 +2223,10 @@ impl crate::tui::TuiState for App {
         self.swarm_panel_focused
     }
 
+    fn cockpit_expanded_agent(&self) -> Option<String> {
+        self.expanded_agent.clone()
+    }
+
     fn swarm_panel_full_page(&self) -> bool {
         self.swarm_panel_full_page && self.inline_swarm_gallery_active()
     }
@@ -2379,16 +2529,22 @@ impl App {
     /// Handle a key while the swarm panel is focused. Returns true if the key was
     /// consumed.
     ///
-    /// Only Esc and Alt-chords are captured (see [`swarm_panel_action_for_key`]):
-    /// the panel is an overlay, not a modal, so plain typing keeps flowing to
-    /// the chat input while it is focused.
+    /// Enter opens the selected agent while focused. Esc and Alt-chords use
+    /// [`swarm_panel_action_for_key`], and other plain typing keeps flowing to
+    /// the chat input. Clicking the composer returns Enter to the chat input.
     pub(crate) fn handle_swarm_panel_key(
         &mut self,
         code: crossterm::event::KeyCode,
         modifiers: crossterm::event::KeyModifiers,
     ) -> bool {
-        if !self.swarm_panel_focused || !self.inline_swarm_gallery_active() {
+        // The sidebar also lists visible/headless workers outside inline spawn
+        // mode. Clicking one gives this panel focus in those modes as well.
+        if !self.swarm_panel_focused || self.inline_swarm_members().is_empty() {
             return false;
+        }
+        if code == crossterm::event::KeyCode::Enter && modifiers.is_empty() {
+            self.pop_out_selected_swarm_agent();
+            return true;
         }
         match swarm_panel_action_for_key(code, modifiers) {
             Some(SwarmPanelAction::SelectNext) => {
@@ -2487,13 +2643,21 @@ impl App {
             self.set_status_notice("No swarm agent selected");
             return;
         };
-        let label = members
-            .iter()
-            .find(|m| m.session_id == session_id)
-            .and_then(|m| m.friendly_name.clone())
+        self.pop_out_swarm_agent_by_id(&session_id);
+    }
+
+    /// Both visible and headless members use a new client attachment to the
+    /// same session. Never spawn a replacement worker or start another turn.
+    pub(crate) fn pop_out_swarm_agent_by_id(&mut self, session_id: &str) {
+        let members = self.inline_swarm_members();
+        let Some(member) = members.iter().find(|member| member.session_id == session_id) else {
+            self.set_status_notice("Swarm agent is no longer available");
+            return;
+        };
+        let label = member.friendly_name.clone()
             .unwrap_or_else(|| session_id.chars().take(8).collect());
 
-        match open_swarm_agent_window(&session_id) {
+        match open_swarm_agent_window(session_id) {
             Ok(true) => self.set_status_notice(format!("Opened {label} in a new window")),
             Ok(false) => self.set_status_notice(format!(
                 "Could not open a terminal for {label} (no emulator found)"
@@ -2511,6 +2675,11 @@ fn open_swarm_agent_window(session_id: &str) -> anyhow::Result<bool> {
         .map(std::path::PathBuf::from)
         .filter(|path| path.is_dir())
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| ".".into()));
+    // Preserve the cracked fork's server socket. The shared launcher passes
+    // --fresh-spawn --resume <id> --socket <socket>. On Windows it detects WT
+    // via WT_SESSION and runs `wt new-tab`, with other emulators/cmd fallback.
+    // Server ResumeSession claims the existing live Agent and registers this
+    // connection for event fanout, even if it previously had no attachments.
     let socket = std::env::var("JCODE_SOCKET").ok();
     super::spawn_in_new_terminal(&exe, session_id, &cwd, socket.as_deref())
 }

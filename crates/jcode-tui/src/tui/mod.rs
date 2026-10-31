@@ -888,6 +888,18 @@ pub trait TuiState {
     }
     /// Total session token usage (input, output) - used for high usage warnings
     fn total_session_tokens(&self) -> Option<(u64, u64)>;
+    // ---- Cockpit tokens ----
+    /// Token-only resident metadata. Implementations must not perform I/O or
+    /// gather unrelated widgets on this per-frame path.
+    fn cockpit_token_data(&self) -> Option<info_widget::InfoWidgetData> {
+        None
+    }
+    /// Managed agent count, summed context tokens, summed output tokens.
+    /// Missing member telemetry makes that entire sum unknown, not zero.
+    fn cockpit_swarm_token_totals(&self) -> Option<(usize, Option<u64>, Option<u64>)> {
+        None
+    }
+
     /// Number of jcode compactions already applied to this session, when known.
     fn session_compaction_count(&self) -> usize {
         0
@@ -1015,6 +1027,10 @@ pub trait TuiState {
     /// Selected agent index in the inline swarm panel (display order).
     fn swarm_panel_selected(&self) -> usize {
         0
+    }
+    /// Agent whose live output and next todo are expanded in the cockpit.
+    fn cockpit_expanded_agent(&self) -> Option<String> {
+        None
     }
     /// Whether the inline swarm panel currently has keyboard focus.
     fn swarm_panel_focused(&self) -> bool {

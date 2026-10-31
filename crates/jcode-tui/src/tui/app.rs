@@ -1483,6 +1483,9 @@ pub struct App {
     debug_force_inline_gallery: bool,
     // Currently selected agent index in the inline swarm panel (display order).
     swarm_panel_selected: usize,
+    // Inline cockpit expansion and last row press for double-click detection.
+    expanded_agent: Option<String>,
+    cockpit_agent_last_click: Option<(String, u16, Instant)>,
     // Whether the inline swarm panel has keyboard focus (navigable list + detail).
     swarm_panel_focused: bool,
     // Whether the focused swarm panel owns the main transcript viewport.

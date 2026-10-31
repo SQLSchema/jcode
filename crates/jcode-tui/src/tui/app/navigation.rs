@@ -7,6 +7,52 @@ use ratatui::layout::Rect;
 #[path = "panel_controls.rs"]
 mod panel_controls;
 
+impl App {
+    /// Injectable dispatch keeps double-click tests from launching a terminal.
+    /// Selection uses the same display order as Alt+N and the sidebar card.
+    pub(crate) fn handle_cockpit_agent_click_with(
+        &mut self,
+        session_id: &str,
+        screen_row: u16,
+        now: Instant,
+        pop_out: impl FnOnce(&mut Self, &str),
+    ) {
+        use crate::tui::TuiState;
+
+        let members = self.inline_swarm_members();
+        let order = crate::tui::info_widget::swarm_gallery::members_display_order(&members);
+        let Some(index) = order.iter().position(|id| id == session_id) else {
+            self.cockpit_agent_last_click = None;
+            return;
+        };
+        self.swarm_panel_selected = index;
+        self.swarm_panel_focused = true;
+        let double_click = self.cockpit_agent_last_click.as_ref().is_some_and(|(id, row, at)| {
+            id == session_id && *row == screen_row
+                && now.saturating_duration_since(*at) <= Duration::from_millis(400)
+        });
+        if double_click {
+            self.cockpit_agent_last_click = None;
+            pop_out(self, session_id);
+        } else {
+            self.expanded_agent = if self.expanded_agent.as_deref() == Some(session_id) {
+                None
+            } else {
+                Some(session_id.to_string())
+            };
+            self.cockpit_agent_last_click = Some((session_id.to_string(), screen_row, now));
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn cockpit_agents_test_app(members: Vec<crate::protocol::SwarmMemberStatus>) -> Self {
+        let mut app = Self::new_for_remote(None);
+        app.debug_force_inline_gallery = true;
+        app.remote_swarm_members = members;
+        app
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct MouseScrollTraceState {
     chat_offset: usize,
@@ -1450,6 +1496,16 @@ impl App {
             picker_cell.borrow_mut().handle_overlay_mouse(mouse);
             finish_mouse_event!(false, "account_picker_overlay");
         }
+        if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+            if let Some(id) = crate::tui::ui::cockpit::agent_at(mouse.column, mouse.row) {
+                self.handle_cockpit_agent_click_with(
+                    &id, mouse.row, Instant::now(), Self::pop_out_swarm_agent_by_id,
+                );
+                finish_mouse_event!(false, "cockpit_agent_click");
+            }
+            // An intervening click elsewhere cannot complete a double-click.
+            self.cockpit_agent_last_click = None;
+        }
         self.normalize_diagram_state();
         let diagram_available = self.diagram_available();
         let layout = super::super::ui::last_layout_snapshot();
@@ -1553,6 +1609,7 @@ impl App {
             None
         };
         if let Some(cursor_pos) = clicked_input_cursor {
+            self.swarm_panel_focused = false;
             self.cursor_pos = cursor_pos.min(self.input.len());
             self.reset_tab_completion();
         }
