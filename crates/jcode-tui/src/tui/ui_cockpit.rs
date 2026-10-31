@@ -131,8 +131,8 @@ pub(crate) fn sidebar_width(total: u16) -> u16 {
 /// Brand gradient endpoints, shared with the welcome hero (#3d5afe -> #b4c0ff).
 const GRAD_FROM: (u8, u8, u8) = (0x3d, 0x5a, 0xfe);
 const GRAD_TO: (u8, u8, u8) = (0xb4, 0xc0, 0xff);
-const WORDMARK: &str = "C R A C K E D  H A R N E S S";
-const WORDMARK_SHORT: &str = "CRACKED";
+const WORDMARK: &str = "C Y B E R P U N K";
+const WORDMARK_SHORT: &str = "CYBERPUNK";
 
 fn gradient(t: f32) -> Color {
     let t = t.clamp(0.0, 1.0);

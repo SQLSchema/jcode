@@ -52,7 +52,7 @@ fn assert_cockpit_contract(width: u16, height: u16) -> Terminal<TestBackend> {
 
     // Header: wordmark + short dir, no full path anywhere.
     let header = text.lines().next().unwrap_or("");
-    assert!(header.contains("CRACKED") || header.contains("C R A C K E D"), "{header:?}");
+    assert!(header.contains("CYBERPUNK") || header.contains("C Y B E R P U N K"), "{header:?}");
     assert!(header.contains("jcode"), "short dir missing: {header:?}");
     assert_no_full_path(&text);
     // jcode's persistent multi-line header is gone.
@@ -170,7 +170,7 @@ fn cockpit_layout_50x20_is_classic() {
     let terminal = render_cockpit(&cockpit_state(), 50, 20);
     let text = welcome_text(&terminal);
     assert!(text.contains("hello there"), "{text}");
-    assert!(!text.contains("C R A C K E D"), "cockpit header at 50 cols:\n{text}");
+    assert!(!text.contains("C Y B E R P U N K"), "cockpit header at 50 cols:\n{text}");
     assert!(!text.contains("╰"), "rounded composer at 50 cols:\n{text}");
     assert_eq!(crate::tui::ui::last_idle_animation_area(), None);
 }
@@ -182,14 +182,14 @@ fn cockpit_off_when_corner_sprite_disabled_or_classic_style() {
         let _corner = CornerSpriteGuard::set(false);
         let _lock = viewport_snapshot_test_lock();
         let text = welcome_text(&render_cockpit(&cockpit_state(), 140, 40));
-        assert!(!text.contains("C R A C K E D"), "{text}");
+        assert!(!text.contains("C Y B E R P U N K"), "{text}");
         assert!(text.contains("/model to switch"), "classic header expected:\n{text}");
     }
     let _style = WelcomeStyleGuard::set("classic", false);
     let _corner = CornerSpriteGuard::set(true);
     let _lock = viewport_snapshot_test_lock();
     let text = welcome_text(&render_cockpit(&cockpit_state(), 140, 40));
-    assert!(!text.contains("C R A C K E D"), "{text}");
+    assert!(!text.contains("C Y B E R P U N K"), "{text}");
     assert_eq!(crate::tui::ui::last_idle_animation_area(), None);
 }
 

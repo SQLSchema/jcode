@@ -57,7 +57,7 @@ fn cockpit_renders_from_real_app_state_at_fullscreen() {
 
     // Header from real App accessors: wordmark, session, short dir, branch.
     let header = &rows[0];
-    assert!(header.contains("C R A C K E D"), "{header}");
+    assert!(header.contains("C Y B E R P U N K"), "{header}");
     assert!(header.contains("sloth"), "session name missing: {header}");
     assert!(header.contains("jcode"), "short dir missing: {header}");
     assert!(header.contains("cracked-welcome"), "branch missing: {header}");

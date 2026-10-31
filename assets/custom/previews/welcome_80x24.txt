@@ -11,7 +11,7 @@
                              ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
                              ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
 
-                         C R A C K E D   H A R N E S S
+                               C Y B E R P U N K
 
     ╭──────────────────────────────────────────────────────────────────────╮
     │1> Say something, or type / for commands...                           │
@@ -21,4 +21,4 @@
                 /resume Sessions   /config Settings   /help Help
 
 
- ~\TUI\jcode                                                jcode v0.99.450-dev
+ ~\TUI\jcode                                                jcode v0.99.479-dev

@@ -2,7 +2,7 @@
 //!
 //! Shown while `[display] welcome_style = "hero"` (the default) and the session
 //! has no conversation yet. Top to bottom, vertically centered in the chat
-//! column: an animated pixel-art sprite, the CRACKED HARNESS block logo, a
+//! column: an animated pixel-art sprite, the CYBERPUNK logo, a
 //! bounded rounded composer, a dim model row and a slash-command menu row. A
 //! footer carries the working directory (left) and version (right).
 //!
@@ -36,7 +36,7 @@ const SPRITE_PNGS: [&[u8]; 4] = [
     include_bytes!("welcome_assets/sprite_24.png"),
 ];
 const LOGO_TXT: &str = include_str!("welcome_assets/logo.txt");
-const LOGO_FALLBACK: &str = "CRACKED HARNESS";
+const LOGO_FALLBACK: &str = "CYBERPUNK";
 pub(crate) const PLACEHOLDER: &str = "Say something, or type / for commands...";
 
 /// Deep blue start of the brand gradient (#3d5afe).
@@ -190,6 +190,9 @@ pub(crate) fn render_sprite_frame(buf: &mut Buffer, area: Rect, size_idx: usize,
 struct Logo {
     rows: Vec<Vec<char>>,
     width: usize,
+    /// ASCII glyph art (no block characters): every non-space char is ink,
+    /// drawn as-is, and the half-block fold is skipped.
+    glyph: bool,
 }
 
 fn logo() -> &'static Logo {
@@ -206,7 +209,11 @@ fn logo() -> &'static Logo {
             rows.remove(0);
         }
         let width = rows.iter().map(Vec::len).max().unwrap_or(0);
-        Logo { rows, width }
+        let glyph = !rows
+            .iter()
+            .flatten()
+            .any(|ch| matches!(ch, '█' | '▒' | '░' | '▓'));
+        Logo { rows, width, glyph }
     })
 }
 
@@ -234,6 +241,10 @@ fn logo_pixel(logo: &Logo, col: usize, row: usize) -> Option<Color> {
     match ch {
         '█' => Some(logo_color(col, row, logo.width, logo.rows.len(), false)),
         '▒' | '░' | '▓' => Some(logo_color(col, row, logo.width, logo.rows.len(), true)),
+        // ASCII glyph art (figlet-style fonts): every visible character is ink.
+        c if logo.glyph && !c.is_whitespace() => {
+            Some(logo_color(col, row, logo.width, logo.rows.len(), false))
+        }
         _ => None,
     }
 }
@@ -379,6 +390,10 @@ pub(crate) fn choose_layout(width: u16, height: u16, composer_rows: u16) -> Opti
     for &(sprite, logo) in ORDER {
         for menu_gap in [true, false] {
             if logo != Line && width < logo.width() + 4 {
+                continue;
+            }
+            // Folding two rows into half blocks only makes sense for block art.
+            if logo == Half && self::logo().glyph {
                 continue;
             }
             if logo == Line && width < LOGO_FALLBACK.len() as u16 + 2 {
@@ -787,8 +802,21 @@ mod tests {
             assert!(sheet.sheet_width >= sheet.size * SPRITE_FRAMES);
         }
         let logo = logo();
-        assert_eq!(logo.rows.len(), 17);
-        assert!(logo.width >= 90 && logo.width <= 92, "{}", logo.width);
+        assert_eq!(logo.rows.len(), 6);
+        assert!(logo.width >= 90 && logo.width <= 96, "{}", logo.width);
+        assert!(logo.glyph, "CYBERPUNK art is ASCII glyph art");
+        // Every visible character is ink in glyph mode.
+        assert!(logo_pixel(logo, 2, 0).is_some(), "{:?}", logo.rows[0]);
+        assert!(logo_pixel(logo, 0, 0).is_none());
+    }
+
+    #[test]
+    fn glyph_logo_never_uses_the_half_block_fold() {
+        for (w, h) in [(80, 24), (120, 30), (140, 40), (238, 64), (100, 20)] {
+            if let Some(layout) = choose_layout(w, h, 3) {
+                assert_ne!(layout.logo, LogoMode::Half, "{w}x{h}: {layout:?}");
+            }
+        }
     }
 
     #[test]

@@ -194,15 +194,15 @@ fn assert_hero_contract(width: u16, height: u16, expect_full_logo: bool) {
         let mut ink = 0;
         for y in hero.logo.top()..hero.logo.bottom() {
             for x in hero.logo.left()..hero.logo.right() {
-                if matches!(buf[(x, y)].symbol(), "█" | "▒" | "▀" | "▄") {
+                if !buf[(x, y)].symbol().trim().is_empty() {
                     ink += 1;
                 }
             }
         }
-        assert!(ink > 300, "block logo missing ({ink} cells):\n{text}");
+        assert!(ink > 300, "logo missing ({ink} cells):\n{text}");
     } else {
         assert!(
-            text.contains("C R A C K E D   H A R N E S S") || text.contains("CRACKED HARNESS"),
+            text.contains("C Y B E R P U N K") || text.contains("CYBERPUNK"),
             "fallback wordmark missing:\n{text}"
         );
     }
