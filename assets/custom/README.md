@@ -213,3 +213,51 @@ it succeeded, and then run `git merge upstream/master`. Resolve conflicts withou
 discarding the custom assets, portable Cargo config, or isolated launch scripts.
 Rebuild the assets if necessary, rerun the packaging tests, and rebuild/install.
 These commands fetch and merge locally. They do not push.
+
+## Make it your main jcode
+
+Opt-in alternative to isolation above. From this checkout, close **all** main
+Jcode clients/servers, unset `JCODE_HOME` and any true `JCODE_CHECK_UPDATES`
+override, then run:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\cracked\test-apply.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\cracked\apply-to-main.ps1 -WhatIf
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\cracked\apply-to-main.ps1
+# One-command rollback, after closing main Jcode again:
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\cracked\rollback-main.ps1
+```
+
+Apply resolves Cargo's `selfdev` compiler artifact like `build.ps1`, backs up
+`%LOCALAPPDATA%\jcode\bin\jcode.exe` and `%USERPROFILE%\.jcode\config.toml`,
+then swaps/verifies the executable and surgically sets
+`[features] check_updates = false`. Add `-Theme` for `[display.colors]` only, or
+`-ArtifactPath 'C:\path\jcode.exe'` for a prebuilt executable. Formatting/BOM and
+unrelated settings stay intact. Ambiguous TOML fails closed. `-WhatIf` prints
+steps and a redacted key-only diff without building, running binaries or writing
+installation/config files. Existing sessions, logins and trusted external paths
+stay in place with **no re-auth**. Auth files/keys are never opened/copied/changed.
+
+The update gate is `src/cli/startup.rs:488-507`; its environment override is
+`crates/jcode-base/src/config/env_overrides.rs:376-379`. Leave `JCODE_HOME` unset:
+`crates/jcode-storage/src/lib.rs::user_home_path` redirects external Claude/Codex
+credentials whenever it exists. Avoid explicit update/install/selfdev/reload
+commands. `update_channel = "manual"` falls back to stable, not disabled.
+Current/stable/shared-server channels are untouched, so servers may still use
+their previous channel. Use ordinary `jcode`, not isolated `cracked.cmd`.
+
+Backups are `jcode.exe.stock-<UTC timestamp>` and `config.toml.bak-<same timestamp>`.
+Rollback restores the newest paired transaction byte-for-byte, including its
+previous update preference, retaining backups. Save post-apply config changes
+first and keep config backups private. Detected install failures recover from
+backups. Both scripts refuse running main clients/servers, including channel
+builds. `-Force` only waits `-WaitSeconds 60` for manual closure, never kills or
+bypasses checks. Do not launch Jcode or edit config during a swap.
+
+The sandbox test uses only TEMP dummy binaries and auth-free fixtures. Repeat
+the real-path **dry-run only**, verifying SHA256, sizes, creation/write/access
+timestamps and backup inventory, with:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\cracked\test-apply.ps1 -RealDryRunOnly
+```
