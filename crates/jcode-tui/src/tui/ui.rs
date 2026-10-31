@@ -3021,8 +3021,23 @@ fn draw_inner(frame: &mut Frame, app: &dyn TuiState) {
         capture.render_order.push("prepare_messages".to_string());
     }
     let prep_start = Instant::now();
+    // Corner sprite (fork): after the first message the welcome sprite moves to
+    // the top-right of the chat. The transcript wraps narrower by its gutter so
+    // text never runs underneath it.
+    let corner_sprite = if !swarm_page_active
+        && !side_panel_fullscreen
+        && diff_pane_area.is_none()
+    {
+        welcome::corner_sprite_layout(app, chat_area)
+    } else {
+        None
+    };
+    let corner_gutter = corner_sprite.map_or(0, |c| c.gutter);
     let chat_left_inset = left_aligned_content_inset(chat_area.width, app.centered_mode());
-    let wide_prepare_width = chat_area.width.saturating_sub(chat_left_inset);
+    let wide_prepare_width = chat_area
+        .width
+        .saturating_sub(chat_left_inset)
+        .saturating_sub(corner_gutter);
     let narrow_prepare_width = wide_prepare_width.saturating_sub(1);
     let pinned_mermaid_aspect_ratio =
         diagram_area.and_then(|area| pinned_diagram_preferred_aspect_ratio(area, pane_position));
@@ -3116,6 +3131,7 @@ fn draw_inner(frame: &mut Frame, app: &dyn TuiState) {
     // The donut is only ever the classic idle decoration; `idle_donut_active`
     // is also true for the hero sprite, which owns the animation slot above.
     let show_donut = !onboarding_welcome
+        && !welcome::corner_sprite_wanted(app)
         && crate::config::config().display.idle_animation
         && super::idle_donut_active(app);
     let donut_height: u16 = idle_donut_reserved_height(show_donut, input_height);
@@ -3439,6 +3455,20 @@ fn draw_inner(frame: &mut Frame, app: &dyn TuiState) {
     };
 
     crate::tui::reset_pinned_diagram_debug_snapshot();
+    // Corner sprite sits over the reserved gutter at the top-right of the
+    // transcript. Drawn after messages so nothing paints over it.
+    let mut corner_rect: Option<Rect> = None;
+    if let Some(corner) = corner_sprite {
+        let (w, h) = welcome::sprite_cells(corner.size_idx);
+        if messages_area.width > corner.gutter && messages_area.height >= h {
+            let rect = Rect::new(messages_area.right() - w - 1, messages_area.y, w, h);
+            welcome::draw_corner_sprite(frame, app, rect, corner.size_idx);
+            corner_rect = Some(rect);
+            if let Some(ref mut capture) = debug_capture {
+                capture.render_order.push("draw_corner_sprite".to_string());
+            }
+        }
+    }
     // Render pinned diagram if we have one
     if let (Some(diagram_info), Some(area)) = (&pinned_diagram, diagram_area) {
         if let Some(ref mut capture) = debug_capture {
@@ -3556,6 +3586,9 @@ fn draw_inner(frame: &mut Frame, app: &dyn TuiState) {
             capture.render_order.push("render_info_widgets".to_string());
         }
         placements = info_widget::calculate_placements(widget_bounds, &margins, &widget_data);
+        if let Some(rect) = corner_rect {
+            placements.retain(|placement| !rects_overlap(placement.rect, rect));
+        }
 
         if let Some(ref mut capture) = debug_capture {
             let placement_captures = capture_widget_placements(&placements);

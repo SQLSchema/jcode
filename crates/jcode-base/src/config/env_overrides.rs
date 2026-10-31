@@ -274,6 +274,11 @@ impl Config {
                 self.display.welcome_style = style;
             }
         }
+        if let Ok(v) = std::env::var("JCODE_CORNER_SPRITE") {
+            if let Some(parsed) = parse_env_bool(&v) {
+                self.display.corner_sprite = parsed;
+            }
+        }
         if let Ok(v) = std::env::var("JCODE_PROMPT_ENTRY_ANIMATION") {
             if let Some(parsed) = parse_env_bool(&v) {
                 self.display.prompt_entry_animation = parsed;

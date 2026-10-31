@@ -216,6 +216,10 @@ idle_animation = false
 # "classic" (original header layout and optional idle donut). Default: hero
 # welcome_style = "hero"
 
+# Keep a small animated welcome sprite in the top-right corner of the chat
+# after the first message (default: true)
+# corner_sprite = true
+
 # Briefly animate a user prompt line when it enters the viewport (default: true)
 prompt_entry_animation = true
 

@@ -63,6 +63,10 @@ pub struct DisplayConfig {
     /// "classic" (original header layout and optional idle donut).
     #[serde(deserialize_with = "crate::serde_lenient::lenient_enum")]
     pub welcome_style: WelcomeStyle,
+    /// Keep a small animated copy of the welcome sprite in the top-right
+    /// corner of the chat once a conversation has started (default: true).
+    #[serde(default = "default_true")]
+    pub corner_sprite: bool,
     /// Briefly animate user prompt line when it enters viewport (default: true)
     pub prompt_entry_animation: bool,
     /// Disable specific animation variants by name (e.g. ["donut", "orbit_rings"])
@@ -157,6 +161,7 @@ impl Default for DisplayConfig {
             latex_rendering: LatexRenderingMode::default(),
             idle_animation: false,
             welcome_style: WelcomeStyle::default(),
+            corner_sprite: true,
             prompt_entry_animation: true,
             disabled_animations: Vec::new(),
             performance: String::new(),
@@ -291,6 +296,10 @@ mod tests {
         assert_eq!(classic.welcome_style, WelcomeStyle::Classic);
         let bogus: DisplayConfig = serde_json::from_str(r#"{"welcome_style":"x"}"#).unwrap();
         assert_eq!(bogus.welcome_style, WelcomeStyle::Hero);
+        assert!(DisplayConfig::default().corner_sprite);
+        assert!(missing.corner_sprite);
+        let off: DisplayConfig = serde_json::from_str(r#"{"corner_sprite":false}"#).unwrap();
+        assert!(!off.corner_sprite);
     }
 
     #[test]

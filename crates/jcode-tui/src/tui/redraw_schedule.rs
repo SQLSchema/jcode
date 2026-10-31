@@ -76,27 +76,84 @@ fn idle_donut_active_with_policy(
     // The idle donut is decorative.  Leaving many dormant tabs/sessions open
     // should not keep every TUI repainting forever, especially when those tabs
     // are hidden behind a terminal multiplexer or kitty single-instance window.
-    if deep_idle_dormant(state) {
+    // The welcome sprite is a small rect on the cheap partial-repaint path, so
+    // it keeps moving while the user reads a reply and only rests after a much
+    // longer quiet spell (see `SPRITE_DORMANT_AFTER`).
+    let sprite_screen =
+        ui::welcome::welcome_hero_wanted(state) || ui::welcome::corner_sprite_wanted(state);
+    let dormant = if sprite_screen {
+        sprite_dormant(state)
+    } else {
+        deep_idle_dormant(state)
+    };
+    if dormant {
         return false;
     }
 
-    // The hero welcome sprite is the fork's default fresh-session look and is
-    // animated independently of the opt-in classic donut setting.
+    // The welcome sprite (hero before the first message, corner badge after)
+    // is the fork's default look and animates independently of the opt-in
+    // classic donut setting.
     let hero = ui::welcome::welcome_hero_wanted(state);
-    let animation_configured = crate::config::config().display.idle_animation || hero;
-    // Windows Terminal / cmd / conhost turn decorative animation off because the
-    // full-screen 3D donut is expensive through ConPTY. The sprite is a small
-    // pre-rendered rect repainted on the partial-repaint fast path at 12fps, so
-    // it stays on there unless the machine is in the Minimal perf tier.
-    let decorative_allowed = policy.enable_decorative_animations
-        || (hero && windows_console_family() && policy.tier.animations_enabled());
-    decorative_allowed
-        && animation_configured
-        && (policy.tier.idle_animation_enabled() || hero)
+    if hero || ui::welcome::corner_sprite_wanted(state) {
+        return sprite_decorative_allowed(policy)
+            && !state.is_processing()
+            && state.streaming_text().is_empty()
+            && state.queued_messages().is_empty();
+    }
+    policy.enable_decorative_animations
+        && crate::config::config().display.idle_animation
+        && policy.tier.idle_animation_enabled()
         && !has_started_conversation(state)
         && !state.is_processing()
         && state.streaming_text().is_empty()
         && state.queued_messages().is_empty()
+}
+
+/// Windows Terminal / cmd / conhost and WSL turn decorative animation off
+/// because the full-screen 3D donut is expensive through ConPTY. The sprite is a
+/// small pre-rendered rect repainted on the partial-repaint fast path at 12fps,
+/// so it stays on there unless the machine is in the Minimal perf tier.
+fn sprite_decorative_allowed(policy: &crate::perf::TuiPerfPolicy) -> bool {
+    policy.enable_decorative_animations
+        || (windows_console_family() && policy.tier.animations_enabled())
+}
+
+/// Whether the welcome sprite (hero or corner) may advance frames right now.
+///
+/// Unlike [`idle_donut_active`] this does not require an idle screen: while a
+/// turn streams, full frames redraw the corner sprite anyway, so it keeps
+/// moving with them instead of freezing on frame 0.
+pub(crate) fn sprite_may_animate(state: &dyn TuiState) -> bool {
+    let policy = crate::perf::tui_policy();
+    state.client_focused()
+        && !state.remote_startup_phase_active()
+        && !sprite_dormant(state)
+        && sprite_decorative_allowed(&policy)
+}
+
+/// How long the welcome sprite keeps animating with no stream activity and no
+/// keystrokes. Much longer than [`REDRAW_DEEP_IDLE_AFTER`] (30s) because the
+/// sprite is the point of the screen while the user reads a reply, yet still
+/// bounded so a forgotten focused window stops repainting eventually.
+const SPRITE_DORMANT_AFTER: Duration = Duration::from_secs(10 * 60);
+
+fn sprite_dormant(state: &dyn TuiState) -> bool {
+    let stream_dormant = state
+        .time_since_activity()
+        .map(|d| d >= SPRITE_DORMANT_AFTER)
+        .unwrap_or(false);
+    let user_dormant = state
+        .time_since_user_interaction()
+        .map(|d| d >= SPRITE_DORMANT_AFTER)
+        .unwrap_or(true);
+    stream_dormant && user_dormant
+}
+
+/// The welcome sprite is on screen and wants animation ticks right now.
+fn sprite_ticking(state: &dyn TuiState, policy: &crate::perf::TuiPerfPolicy) -> bool {
+    animation_on_screen_now()
+        && (ui::welcome::welcome_hero_wanted(state) || ui::welcome::corner_sprite_wanted(state))
+        && idle_donut_active_with_policy(state, policy)
 }
 
 /// Terminals where jcode disables decorative animation by policy (Windows
@@ -457,7 +514,9 @@ pub(crate) fn redraw_interval_with_policy_and_animation(
         return REDRAW_DEEP_IDLE;
     }
 
-    let deep_idle = deep_idle_dormant(state);
+    // A ticking welcome sprite is not dormant even past the 30s deep-idle
+    // mark; it governs its own rest window.
+    let deep_idle = deep_idle_dormant(state) && !sprite_ticking(state, policy);
 
     if deep_idle
         && !state.is_processing()
@@ -485,7 +544,7 @@ pub(crate) fn redraw_interval_with_policy_and_animation(
         if actively_composing(state) {
             return REDRAW_IDLE;
         }
-        if ui::welcome::welcome_hero_wanted(state) {
+        if ui::welcome::welcome_hero_wanted(state) || ui::welcome::corner_sprite_wanted(state) {
             return hero_sprite_interval();
         }
         return match policy.tier {
@@ -603,7 +662,9 @@ pub(crate) fn periodic_redraw_required_excluding_idle_animation(state: &dyn TuiS
 fn periodic_redraw_required_inner(state: &dyn TuiState, include_idle_animation: bool) -> bool {
     let policy = crate::perf::tui_policy();
 
-    let deep_idle = deep_idle_dormant(state);
+    // A ticking welcome sprite is not dormant even past the 30s deep-idle
+    // mark; it governs its own rest window.
+    let deep_idle = deep_idle_dormant(state) && !sprite_ticking(state, &policy);
 
     if deep_idle
         && !state.is_processing()

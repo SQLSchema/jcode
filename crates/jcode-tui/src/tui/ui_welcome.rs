@@ -591,7 +591,7 @@ pub(super) fn draw_hero(
         let rect = Rect::new(area.x + (area.width - w) / 2, y, w, h);
         // Animate only while the shared idle-animation gate allows it (focused,
         // not deep idle, perf tier); otherwise hold a stable first frame.
-        let frame_idx = if crate::tui::idle_donut_active(app) {
+        let frame_idx = if crate::tui::sprite_may_animate(app) {
             sprite_frame_index(app.animation_elapsed())
         } else {
             0
@@ -705,6 +705,63 @@ pub(super) fn draw_hero(
     #[cfg(test)]
     LAST_HERO.with(|slot| slot.set(Some(rects)));
     Some(rects)
+}
+
+// ---------------------------------------------------------- corner sprite ---
+
+/// Where the corner sprite goes once a conversation is running: which sheet
+/// size, and how many columns the transcript gives up on the right for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct CornerSprite {
+    pub size_idx: usize,
+    pub gutter: u16,
+}
+
+/// Transcript columns that must stay usable next to the corner sprite.
+const CORNER_MIN_TRANSCRIPT: u16 = 70;
+
+/// Whether the corner sprite is wanted: the hero style is active, the user
+/// has not turned it off, and the hero has handed over to a real conversation.
+pub(crate) fn corner_sprite_wanted(state: &dyn TuiState) -> bool {
+    configured_welcome_style() == jcode_config_types::WelcomeStyle::Hero
+        && configured_corner_sprite()
+        && conversation_started(state)
+}
+
+fn configured_corner_sprite() -> bool {
+    crate::config::config().display.corner_sprite
+}
+
+/// Pick a corner sprite that fits `chat_area`, or `None` when the terminal is
+/// too small to spare a gutter without cramping the transcript.
+pub(crate) fn corner_sprite_layout(state: &dyn TuiState, chat_area: Rect) -> Option<CornerSprite> {
+    if !corner_sprite_wanted(state) {
+        return None;
+    }
+    // 36px on roomy terminals, 24px otherwise (indices into SPRITE_SIZES).
+    let candidates: &[(usize, u16, u16)] = &[(2, 160, 40), (3, 0, 0)];
+    for &(size_idx, min_width, min_height) in candidates {
+        let (w, h) = sprite_cells(size_idx);
+        let gutter = w + 2;
+        if chat_area.width >= min_width.max(gutter + CORNER_MIN_TRANSCRIPT)
+            && chat_area.height >= min_height.max(h + 10)
+        {
+            return Some(CornerSprite { size_idx, gutter });
+        }
+    }
+    None
+}
+
+/// Draw the corner sprite and publish it to the idle-animation slot so the
+/// run loop can animate it with the cheap sprite-only repaint.
+pub(crate) fn draw_corner_sprite(frame: &mut Frame, app: &dyn TuiState, rect: Rect, size_idx: usize) {
+    let frame_idx = if crate::tui::sprite_may_animate(app) {
+        sprite_frame_index(app.animation_elapsed())
+    } else {
+        0
+    };
+    render_sprite_frame(frame.buffer_mut(), rect, size_idx, frame_idx);
+    record_idle_animation(Some(rect), IdleAnimationKind::WelcomeSprite(size_idx as u8));
 }
 
 #[cfg(test)]

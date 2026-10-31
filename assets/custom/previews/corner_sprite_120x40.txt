@@ -1,0 +1,40 @@
+                                                                                                    ▄▀▀▀▀▀▀▀▀▀▀▀▄
+                                                                                                   ▄▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                                                                                   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                                                                                  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                                                                                   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                                                                                   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                                                                                    ▄▀▀▀▀▀▀▀▀▀▀▀ ▄
+                                                                                               ▄▀▄▄ ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                                                                               ▀▀▀▀▄▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                                                                                ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                                                                                ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                                                                                ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+
+ jcode
+ JCode
+ /model to switch · anthropic · Claude 4.8 Opus
+ v0.99.450
+ Account router · /account to manage · /login to add credential
+ No auto-routing accounts · /login to add credential
+ ~\TUI\jcode
+
+ 1› hello there                                                                                                        │
+
+ Hi! This is a long enough reply that it has to wrap across several rows so we can check it
+ never runs underneath the corner sprite in the top-right of the chat.
+
+2>
+                                                                            /C:\Users\dm101\TUI\jcode Anthropic Opus 4.8
+
+
+
+
+
+
+
+
+
+
+
+

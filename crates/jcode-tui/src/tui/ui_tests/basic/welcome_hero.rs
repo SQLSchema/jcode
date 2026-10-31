@@ -287,6 +287,7 @@ fn welcome_hero_menu_omits_login_when_authenticated() {
 #[test]
 fn welcome_hero_gives_way_once_a_conversation_exists() {
     let _style = WelcomeStyleGuard::set("hero", false);
+    let _corner = CornerSpriteGuard::set(false);
     let _lock = viewport_snapshot_test_lock();
     clear_flicker_frame_history_for_tests();
     crate::tui::ui::clear_test_render_state_for_tests();
@@ -300,6 +301,122 @@ fn welcome_hero_gives_way_once_a_conversation_exists() {
     assert!(!text.contains(crate::tui::ui::welcome::PLACEHOLDER));
     assert!(text.contains("hello"), "{text}");
     assert_eq!(crate::tui::ui::last_idle_animation_area(), None);
+}
+
+/// RAII guard for `JCODE_CORNER_SPRITE`. Callers already hold the env lock
+/// through [`WelcomeStyleGuard`].
+struct CornerSpriteGuard;
+
+impl CornerSpriteGuard {
+    fn set(enabled: bool) -> Self {
+        crate::env::set_var("JCODE_CORNER_SPRITE", if enabled { "1" } else { "0" });
+        crate::config::invalidate_config_cache();
+        Self
+    }
+}
+
+impl Drop for CornerSpriteGuard {
+    fn drop(&mut self) {
+        crate::env::remove_var("JCODE_CORNER_SPRITE");
+        crate::config::invalidate_config_cache();
+    }
+}
+
+fn conversation_state() -> TestState {
+    let mut state = welcome_state();
+    state.display_messages = vec![
+        DisplayMessage::user("hello there".to_string()),
+        DisplayMessage::assistant(
+            "Hi! This is a long enough reply that it has to wrap across several rows so we can \
+             check it never runs underneath the corner sprite in the top-right of the chat."
+                .to_string(),
+        ),
+    ];
+    state
+}
+
+#[test]
+fn corner_sprite_stays_top_right_after_first_message() {
+    let _style = WelcomeStyleGuard::set("hero", false);
+    let _corner = CornerSpriteGuard::set(true);
+    let _lock = viewport_snapshot_test_lock();
+    clear_flicker_frame_history_for_tests();
+    crate::tui::ui::clear_test_render_state_for_tests();
+
+    let state = conversation_state();
+    let terminal = render_welcome(&state, 120, 40);
+    let text = welcome_text(&terminal);
+    maybe_dump_welcome(&terminal, "corner_sprite_120x40");
+
+    // The hero is gone but the sprite lives on in the corner.
+    assert!(crate::tui::ui::welcome::take_last_hero_for_tests().is_none());
+    assert!(text.contains("hello there"), "{text}");
+    let area = crate::tui::ui::last_idle_animation_area().expect("corner sprite published");
+    assert!(matches!(
+        crate::tui::ui::last_idle_animation_kind(),
+        crate::tui::ui::IdleAnimationKind::WelcomeSprite(_)
+    ));
+    // Top-right of the terminal, inside the chat column.
+    assert_eq!(area.y, 0, "{area:?}");
+    assert!(area.right() >= 120 - 2 && area.right() <= 120, "{area:?}");
+    let buf = terminal.backend().buffer();
+    assert!(
+        sprite_cells_in(buf, area) > (area.width as usize * area.height as usize) / 4,
+        "corner sprite mostly empty:\n{text}"
+    );
+    // Transcript text never lands inside the sprite's gutter.
+    for y in area.top()..area.bottom() {
+        for x in area.left().saturating_sub(1)..area.right() {
+            let s = buf[(x, y)].symbol();
+            assert!(
+                s == " " || s == "▀" || s == "▄",
+                "transcript glyph {s:?} under corner sprite at ({x},{y}):\n{text}"
+            );
+        }
+    }
+}
+
+#[test]
+fn corner_sprite_hides_on_narrow_terminals_and_when_disabled() {
+    let _style = WelcomeStyleGuard::set("hero", false);
+    let _lock = viewport_snapshot_test_lock();
+    {
+        let _corner = CornerSpriteGuard::set(true);
+        clear_flicker_frame_history_for_tests();
+        crate::tui::ui::clear_test_render_state_for_tests();
+        let terminal = render_welcome(&conversation_state(), 80, 24);
+        let text = welcome_text(&terminal);
+        assert_eq!(
+            crate::tui::ui::last_idle_animation_area(),
+            None,
+            "80 columns is too tight for a corner sprite:\n{text}"
+        );
+    }
+    {
+        let _corner = CornerSpriteGuard::set(false);
+        clear_flicker_frame_history_for_tests();
+        crate::tui::ui::clear_test_render_state_for_tests();
+        let _ = render_welcome(&conversation_state(), 120, 40);
+        assert_eq!(crate::tui::ui::last_idle_animation_area(), None);
+    }
+}
+
+#[test]
+fn typing_a_draft_keeps_the_hero() {
+    let _style = WelcomeStyleGuard::set("hero", false);
+    let _lock = viewport_snapshot_test_lock();
+    clear_flicker_frame_history_for_tests();
+    crate::tui::ui::clear_test_render_state_for_tests();
+
+    let mut state = welcome_state();
+    state.input = "hey rem".to_string();
+    let terminal = render_welcome(&state, 120, 40);
+    let text = welcome_text(&terminal);
+    assert!(
+        crate::tui::ui::welcome::take_last_hero_for_tests().is_some(),
+        "hero vanished while typing:\n{text}"
+    );
+    assert!(text.contains("hey rem"), "{text}");
 }
 
 #[test]
