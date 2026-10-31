@@ -402,6 +402,30 @@ fn corner_sprite_hides_on_narrow_terminals_and_when_disabled() {
 }
 
 #[test]
+fn corner_sprite_keeps_its_cadence_while_the_model_is_thinking() {
+    let _style = WelcomeStyleGuard::set("hero", false);
+    let _corner = CornerSpriteGuard::set(true);
+    let _lock = viewport_snapshot_test_lock();
+    crate::perf::pin_full_profile_for_tests();
+    clear_flicker_frame_history_for_tests();
+    crate::tui::ui::clear_test_render_state_for_tests();
+
+    let mut state = conversation_state();
+    state.status = ProcessingStatus::Thinking(std::time::Instant::now());
+    let _ = render_welcome(&state, 120, 40);
+    assert!(
+        crate::tui::ui::last_idle_animation_area().is_some(),
+        "corner sprite must stay on screen while a turn runs"
+    );
+    let interval = crate::tui::redraw_interval(&state);
+    assert!(
+        interval <= std::time::Duration::from_millis(100),
+        "redraw slowed to {interval:?} while thinking, freezing the sprite"
+    );
+    assert!(crate::tui::periodic_redraw_required(&state));
+}
+
+#[test]
 fn typing_a_draft_keeps_the_hero() {
     let _style = WelcomeStyleGuard::set("hero", false);
     let _lock = viewport_snapshot_test_lock();

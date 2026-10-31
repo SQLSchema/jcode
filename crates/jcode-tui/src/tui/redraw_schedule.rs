@@ -156,6 +156,17 @@ fn sprite_ticking(state: &dyn TuiState, policy: &crate::perf::TuiPerfPolicy) -> 
         && idle_donut_active_with_policy(state, policy)
 }
 
+/// The corner sprite is on screen and allowed to animate, regardless of
+/// whether a turn is running. Used to keep its cadence during processing.
+fn corner_sprite_live(state: &dyn TuiState, policy: &crate::perf::TuiPerfPolicy) -> bool {
+    animation_on_screen_now()
+        && ui::welcome::corner_sprite_wanted(state)
+        && state.client_focused()
+        && !state.remote_startup_phase_active()
+        && !sprite_dormant(state)
+        && sprite_decorative_allowed(policy)
+}
+
 /// Terminals where jcode disables decorative animation by policy (Windows
 /// Terminal / cmd / conhost, and WSL). The sprite is cheap enough to keep there.
 fn windows_console_family() -> bool {
@@ -591,6 +602,12 @@ pub(crate) fn redraw_interval_with_policy_and_animation(
         && state.streaming_text().is_empty()
         && (state.is_processing() || rate_limit_countdown_redraw_active(state))
     {
+        // The corner sprite keeps dancing while the model thinks. Without this
+        // the loop drops to the 1s liveness tick right after Enter and the
+        // sprite visibly freezes until text starts streaming.
+        if corner_sprite_live(state, policy) {
+            return hero_sprite_interval();
+        }
         return REDRAW_PASSIVE_LIVENESS;
     }
 
@@ -685,6 +702,13 @@ fn periodic_redraw_required_inner(state: &dyn TuiState, include_idle_animation: 
     let animation_paces_redraws =
         idle_donut_paces_redraws(state, &policy, animation_on_screen_now());
     if include_idle_animation && animation_paces_redraws {
+        return true;
+    }
+    // While a turn runs, `idle_donut_paces_redraws` stands down (it is an idle
+    // decoration), but the corner sprite still needs its frames. Processing
+    // already forces full frames below, so this only matters for ticks that
+    // would otherwise be skipped.
+    if include_idle_animation && corner_sprite_live(state, &policy) {
         return true;
     }
 
