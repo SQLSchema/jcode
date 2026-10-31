@@ -1,4 +1,4 @@
-param([string]$Match = 'cracked/', [int]$Width = 1920, [int]$Height = 1040)
+param([string]$Match = 'cracked[/ ]', [int]$Width = 1920, [int]$Height = 1040)
 Add-Type @'
 using System; using System.Text; using System.Runtime.InteropServices;
 public class WinSize {

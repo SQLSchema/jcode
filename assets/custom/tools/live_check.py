@@ -32,7 +32,7 @@ CMD = CRACKED / "bin" / "cracked.cmd"
 SOCK = CRACKED / "run" / "cracked.sock"
 CAP = Path(__file__).resolve().parent / "wincap.ps1"
 OUT = Path(__file__).resolve().parent.parent / "previews"
-TITLE = "cracked/"
+TITLE = "cracked[/ ]"
 
 
 def env():
