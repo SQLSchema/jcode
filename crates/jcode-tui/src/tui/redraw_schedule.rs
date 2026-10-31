@@ -79,8 +79,12 @@ fn idle_donut_active_with_policy(
         return false;
     }
 
+    // The hero welcome sprite is the fork's default fresh-session look and is
+    // animated independently of the opt-in classic donut setting.
+    let animation_configured =
+        crate::config::config().display.idle_animation || ui::welcome::welcome_hero_wanted(state);
     policy.enable_decorative_animations
-        && crate::config::config().display.idle_animation
+        && animation_configured
         && policy.tier.idle_animation_enabled()
         && !has_started_conversation(state)
         && !state.is_processing()

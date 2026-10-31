@@ -45,6 +45,8 @@ pub(crate) use animations::{
     note_idle_animation_fast_path_blocked, note_idle_animation_full_repaint,
     note_idle_animation_partial_repaint, record_idle_animation_area, render_idle_animation_into,
 };
+#[cfg(test)]
+pub(crate) use animations::{IdleAnimationKind, last_idle_animation_kind};
 #[path = "ui_box.rs"]
 mod box_utils;
 #[path = "ui_changelog.rs"]
@@ -75,6 +77,8 @@ mod memory_ui;
 mod messages;
 #[path = "ui_onboarding.rs"]
 mod onboarding;
+#[path = "ui_welcome.rs"]
+pub(crate) mod welcome;
 mod output_style;
 #[path = "ui_overlays.rs"]
 mod overlays;
@@ -3069,7 +3073,51 @@ fn draw_inner(frame: &mut Frame, app: &dyn TuiState) {
         return;
     }
 
-    let show_donut = !onboarding_welcome && super::idle_donut_active(app);
+    // Hero welcome screen: a fresh session with no conversation yet gets the
+    // centered sprite + logo + bounded composer instead of the header/transcript
+    // chrome. Anything that needs the regular layout (inline pickers, side
+    // panes, swarm strip) keeps the classic screen, as does a terminal too
+    // small for even the minimal hero.
+    if welcome::welcome_hero_wanted(app)
+        && !swarm_page_active
+        && !side_panel_fullscreen
+        && pinned_diagram.is_none()
+        && diff_pane_area.is_none()
+        && swarm_strip_height == 0
+        && inline_block_height == 0
+        && let Some(hero) = welcome::draw_hero(
+            frame,
+            app,
+            chat_area,
+            user_count + pending_count + 1,
+            &mut debug_capture,
+        )
+    {
+        record_status_area(hero.footer);
+        record_layout_snapshot(chat_area, diagram_area, None, Some(hero.input));
+        info_widget::note_widget_pass_skipped();
+        input_ui::draw_command_suggestions_overlay(frame, app, hero.composer);
+        input_ui::draw_prompt_history_search_overlay(frame, app, hero.composer);
+        if let Some(mut capture) = debug_capture {
+            capture.render_order.push("draw_welcome_hero".to_string());
+            capture.layout.input_area = Some(hero.input.into());
+            visual_debug::record_frame(capture.build());
+        }
+        finalize_frame_metrics(
+            app,
+            total_start,
+            prep_start.elapsed(),
+            total_start.elapsed(),
+            None,
+        );
+        return;
+    }
+
+    // The donut is only ever the classic idle decoration; `idle_donut_active`
+    // is also true for the hero sprite, which owns the animation slot above.
+    let show_donut = !onboarding_welcome
+        && crate::config::config().display.idle_animation
+        && super::idle_donut_active(app);
     let donut_height: u16 = idle_donut_reserved_height(show_donut, input_height);
     let notification_height =
         input_ui::notification_height(app, chat_area.width).min(chat_area.height.saturating_sub(4));
