@@ -30,7 +30,7 @@ CRACKED = LOCAL / "jcode-cracked"
 EXE = CRACKED / "bin" / "cracked.exe"
 CMD = CRACKED / "bin" / "cracked.cmd"
 SOCK = CRACKED / "run" / "cracked.sock"
-CAP = TMP / "wincap.ps1"
+CAP = Path(__file__).resolve().parent / "wincap.ps1"
 OUT = Path(__file__).resolve().parent.parent / "previews"
 TITLE = "cracked/"
 
@@ -98,7 +98,8 @@ def launch():
 def maximize(width: int = 1920, height: int = 1040):
     """Size the cracked console like a maximized 1920x1080 window."""
     subprocess.run(
-        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(TMP / "winsize.ps1"),
+        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+         str(Path(__file__).resolve().parent / "winsize.ps1"),
          "-Width", str(width), "-Height", str(height)],
         capture_output=True,
     )
