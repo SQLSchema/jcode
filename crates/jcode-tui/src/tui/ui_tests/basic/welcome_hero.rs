@@ -245,6 +245,46 @@ fn welcome_hero_renders_at_reference_sizes() {
 }
 
 #[test]
+fn welcome_hero_shows_for_logged_out_user_with_login_hint() {
+    // A fresh install with no credentials lands on onboarding's resting
+    // "Suggestions" state (a single `/login` suggestion). That is still an
+    // empty screen, so the hero must own it and surface `/login` in its menu.
+    let _style = WelcomeStyleGuard::set("hero", false);
+    let _lock = viewport_snapshot_test_lock();
+    clear_flicker_frame_history_for_tests();
+    crate::tui::ui::clear_test_render_state_for_tests();
+
+    let mut state = welcome_state();
+    state.onboarding_preview = true;
+    state.suggestions = vec![("Log in to get started".to_string(), "/login".to_string())];
+    let terminal = render_welcome(&state, 120, 40);
+    let text = welcome_text(&terminal);
+    assert!(
+        crate::tui::ui::welcome::take_last_hero_for_tests().is_some(),
+        "hero did not render for a logged-out user:\n{text}"
+    );
+    assert!(text.contains(crate::tui::ui::welcome::PLACEHOLDER), "{text}");
+    assert!(text.contains("/login"), "missing /login hint:\n{text}");
+    assert!(text.contains("Log in"), "missing login label:\n{text}");
+    maybe_dump_welcome(&terminal, "welcome_logged_out_120x40");
+}
+
+#[test]
+fn welcome_hero_menu_omits_login_when_authenticated() {
+    let _style = WelcomeStyleGuard::set("hero", false);
+    let _lock = viewport_snapshot_test_lock();
+    clear_flicker_frame_history_for_tests();
+    crate::tui::ui::clear_test_render_state_for_tests();
+
+    let state = welcome_state();
+    let terminal = render_welcome(&state, 120, 40);
+    let text = welcome_text(&terminal);
+    assert!(crate::tui::ui::welcome::take_last_hero_for_tests().is_some());
+    assert!(!text.contains("/login"), "unexpected /login for authed user:\n{text}");
+    assert!(text.contains("/resume"), "{text}");
+}
+
+#[test]
 fn welcome_hero_gives_way_once_a_conversation_exists() {
     let _style = WelcomeStyleGuard::set("hero", false);
     let _lock = viewport_snapshot_test_lock();

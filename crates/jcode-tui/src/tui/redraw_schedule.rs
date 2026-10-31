@@ -67,8 +67,9 @@ fn idle_donut_active_with_policy(
     }
 
     // The onboarding welcome screen is static (no decorative animation), so it
-    // does not need to keep the animation loop running.
-    if state.onboarding_welcome_active() {
+    // does not need to keep the animation loop running. The hero welcome
+    // screen replaces its resting (logged-out) state and does animate.
+    if state.onboarding_welcome_active() && !ui::welcome::welcome_hero_wanted(state) {
         return false;
     }
 

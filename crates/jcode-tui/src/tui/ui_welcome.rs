@@ -52,11 +52,29 @@ const SHADE_FACTOR: f32 = 0.5;
 /// is too small (see [`choose_layout`]).
 pub(crate) fn welcome_hero_wanted(state: &dyn TuiState) -> bool {
     configured_welcome_style() == jcode_config_types::WelcomeStyle::Hero
-        && !state.onboarding_welcome_active()
+        && !guided_onboarding_active(state)
         && !conversation_started(state)
         && !state.is_processing()
         && state.streaming_text().is_empty()
         && state.queued_messages().is_empty()
+}
+
+/// Whether the guided onboarding flow (login import, OpenAI prompt, continue
+/// prompt) owns the screen. Those phases are key-driven and must win. The
+/// resting `Suggestions` state is *not* guided: it is just the empty screen of
+/// a user who has not logged in yet, and the hero shows there with a `/login`
+/// hint instead of the plain classic hint.
+fn guided_onboarding_active(state: &dyn TuiState) -> bool {
+    state.onboarding_welcome_active()
+        && state.onboarding_welcome_kind() != crate::tui::OnboardingWelcomeKind::Suggestions
+}
+
+/// The empty screen of a user with no working credentials asks them to log in.
+fn needs_login(state: &dyn TuiState) -> bool {
+    state
+        .suggestion_prompts()
+        .iter()
+        .any(|(_, prompt)| prompt.trim() == "/login")
 }
 
 fn configured_welcome_style() -> jcode_config_types::WelcomeStyle {
@@ -494,12 +512,21 @@ fn put_line(buf: &mut Buffer, x: u16, y: u16, max_x: u16, line: &Line<'_>) {
     }
 }
 
-fn menu_line(width: u16) -> Line<'static> {
-    let items = [
-        ("/resume", "Sessions"),
-        ("/config", "Settings"),
-        ("/help", "Help"),
-    ];
+fn menu_line(width: u16, needs_login: bool) -> Line<'static> {
+    let items: &[(&str, &str)] = if needs_login {
+        &[
+            ("/login", "Log in"),
+            ("/resume", "Sessions"),
+            ("/config", "Settings"),
+            ("/help", "Help"),
+        ]
+    } else {
+        &[
+            ("/resume", "Sessions"),
+            ("/config", "Settings"),
+            ("/help", "Help"),
+        ]
+    };
     let full: usize = items
         .iter()
         .map(|(cmd, label)| cmd.len() + 1 + label.len())
@@ -627,7 +654,7 @@ pub(super) fn draw_hero(
     put_line(frame.buffer_mut(), model_x, y, max_x, &Line::from(spans));
     y += 1 + u16::from(layout.menu_gap);
 
-    let menu = menu_line(area.width);
+    let menu = menu_line(area.width, needs_login(app));
     let menu_width = menu.width() as u16;
     put_line(
         frame.buffer_mut(),
