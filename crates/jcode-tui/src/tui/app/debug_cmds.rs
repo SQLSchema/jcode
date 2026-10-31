@@ -464,6 +464,41 @@ impl App {
                 self.debug_force_inline_gallery = true;
                 format!("OK: injected {n} inline swarm members; gallery forced active")
             }
+        } else if let Some(raw) = cmd.strip_prefix("tokens-fixture:") {
+            // Debug-only: fill the token counters the cockpit tokens card
+            // reads, so its live rendering can be checked without a provider
+            // login. Format: tokens-fixture:<in>,<out>,<cache_read>,<cache_write>,<ctx>,<limit>
+            // or tokens-fixture:off to zero them again.
+            if raw.trim() == "off" {
+                self.token_accounting.total_input_tokens = 0;
+                self.token_accounting.total_output_tokens = 0;
+                self.token_accounting.total_cache_prompt_tokens = 0;
+                self.token_accounting.total_cache_read_tokens = 0;
+                self.token_accounting.total_cache_creation_tokens = 0;
+                self.streaming.streaming_input_tokens = 0;
+                "OK: token fixture cleared".to_string()
+            } else {
+                let nums: Vec<u64> = raw
+                    .split(',')
+                    .filter_map(|part| part.trim().parse().ok())
+                    .collect();
+                if nums.len() != 6 {
+                    "tokens-fixture error: expected in,out,cache_read,cache_write,ctx,limit"
+                        .to_string()
+                } else {
+                    self.token_accounting.total_input_tokens = nums[0];
+                    self.token_accounting.total_output_tokens = nums[1];
+                    self.token_accounting.total_cache_read_tokens = nums[2];
+                    self.token_accounting.total_cache_creation_tokens = nums[3];
+                    self.token_accounting.total_cache_prompt_tokens = nums[2] + nums[3];
+                    self.streaming.streaming_input_tokens = nums[4];
+                    self.streaming.streaming_cache_read_tokens = None;
+                    self.streaming.streaming_cache_creation_tokens = None;
+                    self.streaming.streaming_context_stale = false;
+                    self.context_limit = nums[5];
+                    format!("OK: token fixture set {nums:?}")
+                }
+            }
         } else if cmd == "swarm" || cmd == "swarm-status" {
             if self.is_remote {
                 serde_json::json!({

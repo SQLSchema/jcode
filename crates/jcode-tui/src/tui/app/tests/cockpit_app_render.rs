@@ -93,3 +93,45 @@ fn cockpit_renders_from_real_app_state_at_fullscreen() {
         let _ = std::fs::write(dir.join("cockpit_app_238x64.txt"), &text);
     }
 }
+
+#[test]
+fn cockpit_agent_row_real_mouse_double_click_pops_out() {
+    // Drive the real handle_mouse_event path (Down, Up, Down) on a published
+    // hit row, the way a terminal reports a double-click. Live testing showed
+    // the second press acting as a plain single click instead.
+    use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+    let member = |id: &str, name: &str| crate::protocol::SwarmMemberStatus {
+        session_id: id.into(),
+        friendly_name: Some(name.into()),
+        status: "running".into(),
+        detail: None,
+        task_label: None,
+        role: Some("agent".into()),
+        is_headless: Some(true),
+        live_attachments: Some(0),
+        status_age_secs: Some(1),
+        output_tail: None,
+        report_back_to_session_id: None,
+        todo_progress: None,
+        todo_items: Vec::new(),
+        runtime: Default::default(),
+    };
+    let _lock = crate::tui::ui::render_state_test_lock();
+    let mut app = App::cockpit_agents_test_app(vec![member("a", "fox"), member("b", "owl")]);
+    crate::tui::ui::cockpit::record_agent_hit_rows(vec![(10, 100, 120, "b".into())]);
+    let ev = |kind| MouseEvent { kind, column: 105, row: 10, modifiers: KeyModifiers::empty() };
+    app.handle_mouse_event(ev(MouseEventKind::Down(MouseButton::Left)));
+    app.handle_mouse_event(ev(MouseEventKind::Up(MouseButton::Left)));
+    assert_eq!(app.expanded_agent.as_deref(), Some("b"), "single click expands");
+    assert!(
+        app.cockpit_agent_last_click.is_some(),
+        "the first click must survive its own mouse-up so a second press can double-click"
+    );
+    app.handle_mouse_event(ev(MouseEventKind::Down(MouseButton::Left)));
+    assert!(
+        app.cockpit_agent_last_click.is_none(),
+        "a second press inside the window is consumed as a double-click"
+    );
+    assert_eq!(app.expanded_agent.as_deref(), Some("b"), "double-click keeps the row open");
+    crate::tui::ui::cockpit::record_agent_hit_rows(Vec::new());
+}
