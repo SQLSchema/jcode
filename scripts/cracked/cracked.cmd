@@ -14,6 +14,12 @@ set "JCODE_SERVER_DISPLAY_NAME=cracked"
 set "JCODE_SESSION_ID="
 set "JCODE_SERVER_PID="
 set "JCODE_DEBUG_SOCKET="
+rem Stock named-profile selections reference a config that this fork never reads.
+rem Select fork profiles explicitly with --provider-profile instead.
+set "JCODE_PROVIDER_PROFILE_NAME="
+set "JCODE_PROVIDER_PROFILE_ACTIVE="
+set "JCODE_NAMED_PROVIDER_PROFILE="
+set "JCODE_RELOAD_AUTH_STATUS="
 set "CRACKED_EXE=%LOCALAPPDATA%\jcode-cracked\bin\cracked.exe"
 if /i "%~1"=="--dry-run" goto dryrun
 powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%~dp0seed.ps1"

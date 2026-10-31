@@ -115,7 +115,11 @@ self-development commands if you want to retain the custom build.
 | Project files and explicitly supplied environment variables | Same Windows user and working directory, not sandboxed |
 
 The launcher replaces inherited stock routing variables and clears inherited
-session/server identifiers. It passes the isolated socket explicitly. This is
+session/server identifiers and stale named-provider-profile selectors. Stock
+profile names refer to a config the fork deliberately does not read, and inheriting
+them can otherwise fail startup with "Unknown provider profile". Configure any
+fork profile in its own config and select it with `--provider-profile`. The
+launcher passes the isolated socket explicitly. This is
 important: **`JCODE_HOME` alone does not isolate the server**. Socket defaults
 come from the runtime directory, independently of home. On Windows the transport
 hashes the full socket path into a named-pipe identifier, so the fork gets a
@@ -177,6 +181,22 @@ The packaging test checks PowerShell syntax, dry-run behavior, palette keys agai
 `palette.rs`, first-run seeding, and preservation of existing fork config. It uses
 a temporary fake LocalAppData directory and never launches a server or reads the
 stock config.
+
+For an observable runtime check after installation (requires Python 3.11+):
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/cracked/smoke.ps1
+```
+
+This copies only the installed executable and auth-free helpers into a temporary
+package, launches its real `.cmd` wrapper with deliberately incorrect inherited
+routing/profile selectors, and requires a matching IPC ping/pong from the fork's
+unique Windows named pipe. It parses the actual first-run config as TOML and
+checks that existing stock Jcode processes retain their PIDs and start times.
+No model request is sent. Cleanup stops only the exact test child by its known
+process handle, not processes by name, and removes only the temporary package.
+On this Windows machine the runtime check observed an isolated server answering
+ping, all 22 seeded colors, and three unchanged stock Jcode process identities.
 
 ## Sync upstream
 
