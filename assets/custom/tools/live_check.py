@@ -70,11 +70,11 @@ def stop():
         )
 
 
-def launch():
+def launch(cwd: str | None = None):
     stop()
-    # Launch from the user's home folder: starting inside the jcode repo turns
+    # Default to the user's home folder: starting inside the jcode repo turns
     # on self-dev mode, which is not what the user runs day to day.
-    home = os.environ.get("USERPROFILE", str(Path.home()))
+    home = cwd or os.environ.get("USERPROFILE", str(Path.home()))
     subprocess.Popen(
         ["cmd", "/c", "start", "", "/max", "/d", home, "cmd", "/k", str(CMD)],
         env=env(),
@@ -172,7 +172,7 @@ def anim(box: str, samples: int = 10):
 if __name__ == "__main__":
     action = sys.argv[1]
     if action == "launch":
-        launch()
+        launch(sys.argv[2] if len(sys.argv) > 2 else None)
     elif action == "inject-chat":
         inject_chat()
     elif action == "shot":
