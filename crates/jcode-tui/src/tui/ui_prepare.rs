@@ -466,6 +466,9 @@ fn prepare_active_batch_progress(
     wrap_lines_with_map(lines, &[], &[], &[], &[], &[], width, &[], &[], &[])
 }
 
+/// Classic (non-cockpit) prepare; the render path calls
+/// [`prepare_messages_for`] directly, tests use this wrapper.
+#[cfg(test)]
 pub(super) fn prepare_messages(
     app: &dyn TuiState,
     width: u16,
