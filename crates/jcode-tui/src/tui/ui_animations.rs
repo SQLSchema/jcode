@@ -102,9 +102,66 @@ pub(crate) fn idle_animation_debug_json() -> serde_json::Value {
     })
 }
 
+/// What the published idle-animation rectangle holds, so the animation-only
+/// partial repaint redraws the same thing the last full frame drew.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum IdleAnimationKind {
+    /// The decorative 3D donut / orbit rings below the composer.
+    Donut,
+    /// The welcome-screen pixel sprite at the given size index.
+    WelcomeSprite(u8),
+}
+
+impl IdleAnimationKind {
+    fn pack(self) -> u8 {
+        match self {
+            Self::Donut => 0,
+            Self::WelcomeSprite(idx) => idx.saturating_add(1),
+        }
+    }
+
+    fn unpack(raw: u8) -> Self {
+        match raw {
+            0 => Self::Donut,
+            n => Self::WelcomeSprite(n - 1),
+        }
+    }
+}
+
+#[cfg(not(test))]
+static LAST_IDLE_ANIMATION_KIND: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+/// Publish the animated rectangle together with what it contains.
+pub(crate) fn record_idle_animation(area: Option<Rect>, kind: IdleAnimationKind) {
+    #[cfg(test)]
+    {
+        TEST_LAST_IDLE_ANIMATION_KIND.with(|slot| slot.set(kind.pack()));
+    }
+    #[cfg(not(test))]
+    {
+        LAST_IDLE_ANIMATION_KIND.store(kind.pack(), std::sync::atomic::Ordering::Relaxed);
+    }
+    record_idle_animation_area_only(area);
+}
+
+pub(crate) fn last_idle_animation_kind() -> IdleAnimationKind {
+    #[cfg(test)]
+    {
+        return IdleAnimationKind::unpack(TEST_LAST_IDLE_ANIMATION_KIND.with(std::cell::Cell::get));
+    }
+    #[cfg(not(test))]
+    {
+        IdleAnimationKind::unpack(LAST_IDLE_ANIMATION_KIND.load(std::sync::atomic::Ordering::Relaxed))
+    }
+}
+
 /// Publish the animated rectangle for the animation-only partial repaint.
 /// `None` means the last frame drew no animation, disabling the fast path.
 pub(crate) fn record_idle_animation_area(area: Option<Rect>) {
+    record_idle_animation(area, IdleAnimationKind::Donut);
+}
+
+fn record_idle_animation_area_only(area: Option<Rect>) {
     #[cfg(test)]
     {
         TEST_LAST_IDLE_ANIMATION_AREA.with(|snapshot| {
@@ -146,6 +203,24 @@ pub(crate) fn render_idle_animation_into(buf: &mut Buffer, area: Rect, elapsed: 
         for x in area.left()..area.right() {
             buf[(x, y)].reset();
         }
+    }
+    if let IdleAnimationKind::WelcomeSprite(size_idx) = last_idle_animation_kind() {
+        super::welcome::render_sprite_frame(
+            buf,
+            area,
+            size_idx as usize,
+            super::welcome::sprite_frame_index(elapsed),
+        );
+        // The sprite paints backgrounds too (half-block pixels), so mirror the
+        // full-frame adaptation for both channels.
+        for y in area.top()..area.bottom() {
+            for x in area.left()..area.right() {
+                let cell = &mut buf[(x, y)];
+                cell.bg = jcode_tui_style::adapt_color_for_theme(cell.bg);
+                cell.fg = jcode_tui_style::adapt_foreground_for_display(cell.fg, cell.bg);
+            }
+        }
+        return;
     }
     render_idle_animation(buf, area, elapsed);
     for y in area.top()..area.bottom() {
@@ -263,6 +338,7 @@ impl IdleBuffers {
 #[cfg(test)]
 thread_local! {
     static TEST_LAST_IDLE_ANIMATION_AREA: RefCell<Option<Rect>> = const { RefCell::new(None) };
+    static TEST_LAST_IDLE_ANIMATION_KIND: std::cell::Cell<u8> = const { std::cell::Cell::new(0) };
 }
 
 thread_local! {
