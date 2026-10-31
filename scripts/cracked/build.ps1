@@ -26,6 +26,15 @@ try {
         return
     }
     # The repository config is portable, so no manual --config override is needed.
+    # Stamp the real commit: jcode-build-meta deliberately does not watch .git,
+    # so without this the footer/--version keep showing a stale hash. Setting
+    # these env vars only reruns that tiny build script when the hash changes.
+    $gitHash = (& git rev-parse --short=9 HEAD 2>$null)
+    if ($LASTEXITCODE -eq 0 -and $gitHash) {
+        $env:JCODE_BUILD_GIT_HASH = $gitHash.Trim()
+        $dirty = (& git status --porcelain --untracked-files=no 2>$null)
+        $env:JCODE_BUILD_GIT_DIRTY = if ($dirty) { '1' } else { '0' }
+    }
     # Read Cargo's artifact stream to handle custom target dirs / target triples.
     $artifactPath = $null
     & cargo build --profile selfdev -p jcode --bin jcode --message-format=json-render-diagnostics | ForEach-Object {
