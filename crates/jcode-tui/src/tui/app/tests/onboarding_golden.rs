@@ -226,26 +226,46 @@ fn onboarding_golden_walks_every_phase() {
     let width = 80u16;
     let height = 30u16;
 
-    // 1. No detected imports: "Log in to OpenAI?" Yes/No prompt.
+    // 1. No detected imports: "How do you want to log in?" sign-in list.
     {
-        let app = app_in_phase(OnboardingPhase::LoginOpenAi {
-            yes_highlighted: true,
-        });
+        let app = app_in_phase(OnboardingPhase::LoginOpenAi { selected: 0 });
         let text = render_onboarding_text(&app, width, height);
         dump("LoginOpenAi (no imports)", &text);
-        // Lean prompt: just the question + the Yes/No lozenge pills. The Esc hint
-        // already covers the "skip / log in later" path, so no extra prose.
-        assert!(text.contains("Log in to OpenAI?"), "{text}");
-        assert!(text.contains("Yes") && text.contains("No"), "{text}");
+        assert!(text.contains("How do you want to log in?"), "{text}");
+        for (n, title) in [
+            (1, "Claude"),
+            (2, "OpenAI"),
+            (3, "Reuse logins"),
+            (4, "API key"),
+            (5, "Local model"),
+            (6, "Browse all"),
+            (7, "Skip for now"),
+        ] {
+            assert!(
+                text.lines().any(|l| l.contains(&format!("{n}  {title}"))),
+                "row {n} {title} missing: {text}"
+            );
+        }
+        // The selected row is marked; only one marker on screen.
+        let marked = text
+            .lines()
+            .filter(|l| {
+                let t = l.trim_start();
+                t.starts_with("> ") && t[2..].starts_with(|c: char| c.is_ascii_digit())
+            })
+            .count();
+        assert_eq!(marked, 1, "exactly one selected row: {text}");
         assert!(
-            text.contains("\u{25D6} Yes \u{25D7}") && text.contains("\u{25D6} No \u{25D7}"),
-            "yes/no lozenge pills: {text}"
+            text.lines().any(|l| l.contains("> 1  Claude")),
+            "default highlight on Claude: {text}"
         );
-        // The redundant "Choose No to skip" line was removed.
-        assert!(
-            !text.contains("Choose \"No\" to skip"),
-            "redundant skip line should be gone: {text}"
-        );
+        // Detail counts come from the catalog, not a hard-coded number.
+        let api = crate::tui::app::onboarding_flow::api_key_provider_count();
+        assert!(text.contains(&format!("{api} providers")), "{text}");
+        // Every row fits an 80-col terminal (no wrapping chrome).
+        for line in text.lines() {
+            assert!(unicode_width::UnicodeWidthStr::width(line) <= width as usize, "{line}");
+        }
     }
 
     // 1b. Recovery fallback: bare Login phase with no import (import declined or
@@ -487,9 +507,7 @@ fn onboarding_golden_walks_failure_and_async_states() {
         assert_guided_polish("Login (import list)", &text);
     }
     {
-        let app = app_in_phase(OnboardingPhase::LoginOpenAi {
-            yes_highlighted: true,
-        });
+        let app = app_in_phase(OnboardingPhase::LoginOpenAi { selected: 0 });
         let text = render_onboarding_text(&app, width, height);
         assert_guided_polish("LoginOpenAi", &text);
     }
@@ -587,9 +605,7 @@ fn onboarding_import_happy_path_images() {
 
     // ---- login_openai: fresh install, nothing importable detected ----
     {
-        let app = app_in_phase(OnboardingPhase::LoginOpenAi {
-            yes_highlighted: true,
-        });
+        let app = app_in_phase(OnboardingPhase::LoginOpenAi { selected: 0 });
         write_onboarding_svg(&output_dir, "login-openai.svg", &app, width, height);
     }
 

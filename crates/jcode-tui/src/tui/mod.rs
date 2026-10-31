@@ -1440,11 +1440,14 @@ pub enum OnboardingWelcomeKind {
         /// option.
         repair_agent_label: Option<String>,
     },
-    /// Ask the user whether to log in to OpenAI (no detected imports). A
-    /// highlightable Yes/No selector; `yes_highlighted` reflects the current
-    /// choice. Yes starts the OpenAI sign-in, No skips login and finishes
-    /// onboarding (the user can run `/login` later).
-    LoginOpenAi { yes_highlighted: bool },
+    /// "How do you want to sign in?" list (no detected imports). `rows` are
+    /// (title, detail) pairs in display order; `selected` is the highlighted
+    /// row. Picking a row starts that sign-in, opens the provider picker, or
+    /// skips onboarding.
+    LoginOpenAi {
+        selected: usize,
+        rows: Vec<(String, String)>,
+    },
     /// "Continue where you left off in <cli>?" with a highlightable Yes/No
     /// selector and a live decision countdown (seconds remaining).
     ContinuePrompt {

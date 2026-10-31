@@ -37,23 +37,19 @@ fn rehearsal_starts_the_real_first_run_flow_and_exits() {
             .unwrap();
         assert!(app.onboarding_sim_active(), "Cmd+5 should start it");
         assert!(app.onboarding_welcome_active());
-        // Nothing to import in an empty home, so the real flow asks about
-        // OpenAI, exactly like a brand-new user with no other tools.
+        // Nothing to import in an empty home, so the real flow shows the
+        // sign-in list, exactly like a brand-new user with no other tools.
         assert!(matches!(
             app.onboarding_phase(),
-            Some(OnboardingPhase::LoginOpenAi {
-                yes_highlighted: true
-            })
+            Some(OnboardingPhase::LoginOpenAi { selected: 0 })
         ));
 
-        // Keys reach the real handlers: l moves the highlight to "No".
-        app.handle_key(KeyCode::Char('l'), KeyModifiers::NONE)
+        // Keys reach the real handlers: j moves the highlight down a row.
+        app.handle_key(KeyCode::Char('j'), KeyModifiers::NONE)
             .unwrap();
         assert!(matches!(
             app.onboarding_phase(),
-            Some(OnboardingPhase::LoginOpenAi {
-                yes_highlighted: false
-            })
+            Some(OnboardingPhase::LoginOpenAi { selected: 1 })
         ));
 
         app.handle_key(KeyCode::Char('5'), KeyModifiers::SUPER)
@@ -170,9 +166,7 @@ fn alt_5_restarts_the_rehearsal_from_a_pristine_first_screen() {
         assert!(app.onboarding_preview_mode);
         assert!(matches!(
             app.onboarding_phase(),
-            Some(OnboardingPhase::LoginOpenAi {
-                yes_highlighted: true
-            })
+            Some(OnboardingPhase::LoginOpenAi { selected: 0 })
         ));
         assert!(app.onboarding_import_in_progress.is_none());
         assert!(app.onboarding_import_error.is_none());

@@ -365,6 +365,98 @@ impl ImportReview {
     }
 }
 
+/// One row of the first-run "how do you want to sign in?" list.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum LoginChoice {
+    /// Anthropic OAuth (Claude Pro/Max subscription).
+    Claude,
+    /// OpenAI OAuth (ChatGPT Plus/Pro).
+    OpenAi,
+    /// Reuse logins from Claude Code, Codex, OpenCode and friends.
+    ReuseLogins,
+    /// Paste an API key: provider picker narrowed to API-key providers.
+    ApiKey,
+    /// A local model server (Ollama, LM Studio).
+    Local,
+    /// The full provider picker.
+    BrowseAll,
+    /// Skip for now; `/login` later.
+    Skip,
+}
+
+impl LoginChoice {
+    /// Display order. The first row is the default highlight.
+    pub(crate) const ALL: [LoginChoice; 7] = [
+        LoginChoice::Claude,
+        LoginChoice::OpenAi,
+        LoginChoice::ReuseLogins,
+        LoginChoice::ApiKey,
+        LoginChoice::Local,
+        LoginChoice::BrowseAll,
+        LoginChoice::Skip,
+    ];
+
+    pub(crate) fn at(index: usize) -> LoginChoice {
+        Self::ALL[index.min(Self::ALL.len() - 1)]
+    }
+
+    pub(crate) fn title(self) -> &'static str {
+        match self {
+            LoginChoice::Claude => "Claude",
+            LoginChoice::OpenAi => "OpenAI",
+            LoginChoice::ReuseLogins => "Reuse logins",
+            LoginChoice::ApiKey => "API key",
+            LoginChoice::Local => "Local model",
+            LoginChoice::BrowseAll => "Browse all",
+            LoginChoice::Skip => "Skip for now",
+        }
+    }
+
+    /// Dim detail column. Counts come from the provider catalog, so new
+    /// providers show up without touching this list.
+    pub(crate) fn detail(self) -> String {
+        match self {
+            LoginChoice::Claude => "Pro / Max subscription (OAuth)".to_string(),
+            LoginChoice::OpenAi => "ChatGPT Plus / Pro (OAuth)".to_string(),
+            LoginChoice::ReuseLogins => "from Claude Code, Codex, OpenCode...".to_string(),
+            LoginChoice::ApiKey => format!(
+                "{} providers (DeepSeek, Groq, xAI, OpenRouter...)",
+                api_key_provider_count()
+            ),
+            LoginChoice::Local => "Ollama, LM Studio".to_string(),
+            LoginChoice::BrowseAll => format!("all {} providers", login_provider_count()),
+            LoginChoice::Skip => "log in later with /login".to_string(),
+        }
+    }
+}
+
+/// Providers in the TUI login picker that take an API key.
+pub(crate) fn api_key_provider_count() -> usize {
+    crate::provider_catalog::tui_login_providers()
+        .iter()
+        .filter(|p| is_api_key_provider(p))
+        .count()
+}
+
+/// Every provider in the TUI login picker (the auto-import pseudo-entry is a
+/// route, not a provider, so it is not counted).
+pub(crate) fn login_provider_count() -> usize {
+    crate::provider_catalog::tui_login_providers()
+        .iter()
+        .filter(|p| !matches!(p.target, crate::provider_catalog::LoginProviderTarget::AutoImport))
+        .count()
+}
+
+pub(crate) fn is_api_key_provider(p: &crate::provider_catalog::LoginProviderDescriptor) -> bool {
+    use crate::provider_catalog::LoginProviderAuthKind as K;
+    matches!(p.auth_kind, K::ApiKey | K::Hybrid)
+}
+
+pub(crate) fn is_local_provider(p: &crate::provider_catalog::LoginProviderDescriptor) -> bool {
+    p.auth_kind == crate::provider_catalog::LoginProviderAuthKind::Local
+        && !matches!(p.target, crate::provider_catalog::LoginProviderTarget::AutoImport)
+}
+
 /// The current phase of the onboarding flow.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum OnboardingPhase {
@@ -377,17 +469,19 @@ pub(crate) enum OnboardingPhase {
     /// When `None`, there was nothing to import and we prompt the user to pick a
     /// provider manually (Enter opens the login picker).
     Login { import: Option<ImportReview> },
-    /// Ask the user whether to log in to OpenAI. Shown on a fresh install when
-    /// no importable external logins were detected. A highlightable Yes/No
-    /// selector (default "Yes") matching the import walkthrough: Yes starts the
-    /// OpenAI sign-in, No exits onboarding to the normal new-session screen with
-    /// a system message telling the user to run `/login` when ready (we avoid the
-    /// inline provider picker here). Unlike the import/telemetry prompts this one
-    /// has no auto-timeout: logging in is a meaningful first step, so we wait for
-    /// the user rather than opening a browser on a countdown.
+    /// Pick how to sign in. Shown on a fresh install when no importable
+    /// external logins were detected: a short list of sign-in routes (Claude,
+    /// OpenAI, reuse logins from other tools, API key, local model, browse
+    /// every provider, skip). Up/Down move, digits pick a row directly, Enter
+    /// chooses. There is no auto-timeout: logging in is a meaningful first
+    /// step, so we wait for the user rather than opening a browser on a
+    /// countdown.
+    ///
+    /// The variant keeps its historical name (and the graph node keeps its
+    /// frozen `login_openai` telemetry label); only the screen changed.
     LoginOpenAi {
-        /// Which option is highlighted (true = "Yes, log in to OpenAI").
-        yes_highlighted: bool,
+        /// Highlighted row in [`LoginChoice::ALL`].
+        selected: usize,
     },
     /// Legacy phase kept for compatibility with older replay/test fixtures.
     /// New onboarding skips explicit model selection and uses the default route;
@@ -499,9 +593,7 @@ impl OnboardingFlow {
             Some(review) => OnboardingPhase::Login {
                 import: Some(review),
             },
-            None => OnboardingPhase::LoginOpenAi {
-                yes_highlighted: true,
-            },
+            None => OnboardingPhase::LoginOpenAi { selected: 0 },
         };
         Self { phase }
     }

@@ -1471,9 +1471,14 @@ impl App {
                     }),
                 }
             }
-            Some(OnboardingPhase::LoginOpenAi { yes_highlighted }) => {
+            Some(OnboardingPhase::LoginOpenAi { selected }) => {
+                use crate::tui::app::onboarding_flow::LoginChoice;
                 OnboardingWelcomeKind::LoginOpenAi {
-                    yes_highlighted: *yes_highlighted,
+                    selected: *selected,
+                    rows: LoginChoice::ALL
+                        .iter()
+                        .map(|choice| (choice.title().to_string(), choice.detail()))
+                        .collect(),
                 }
             }
             Some(OnboardingPhase::ModelSelect) => OnboardingWelcomeKind::Suggestions,

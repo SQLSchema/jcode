@@ -133,6 +133,51 @@ fn continue_pill_line(focused: bool, align: Alignment) -> Line<'static> {
     Line::from(lozenge_pill_spans("Continue", focused)).alignment(align)
 }
 
+/// The first-run sign-in list: `N  Title   detail`, one row each. The selected
+/// row gets a `>` marker (ASCII, so it reads on any terminal font), the accent
+/// color and BOLD (a non-color attribute, so the selection survives monochrome
+/// terminals). Titles are padded to one column so details line up; every row
+/// is padded to the same width so a centered block stays aligned.
+fn login_choice_lines(
+    rows: &[(String, String)],
+    selected: usize,
+    align: Alignment,
+) -> Vec<Line<'static>> {
+    use unicode_width::UnicodeWidthStr;
+    let title_w = rows.iter().map(|(t, _)| t.width()).max().unwrap_or(0);
+    let row_w = rows
+        .iter()
+        .map(|(_, d)| 6 + title_w + 3 + d.width())
+        .max()
+        .unwrap_or(0);
+    rows.iter()
+        .enumerate()
+        .map(|(i, (title, detail))| {
+            let on = i == selected;
+            let marker = if on { "> " } else { "  " };
+            let key_style = Style::default().fg(dim_color());
+            let mut title_style = Style::default().fg(if on {
+                welcome_accent()
+            } else {
+                rgb(200, 204, 212)
+            });
+            if on {
+                title_style = title_style.add_modifier(Modifier::BOLD);
+            }
+            let used = 6 + title_w + 3 + detail.width();
+            Line::from(vec![
+                Span::styled(marker.to_string(), Style::default().fg(welcome_accent())),
+                Span::styled(format!("{}  ", i + 1), key_style),
+                Span::styled(format!("{title:<title_w$}"), title_style),
+                Span::raw("   "),
+                Span::styled(detail.clone(), Style::default().fg(dim_color())),
+                Span::raw(" ".repeat(row_w.saturating_sub(used))),
+            ])
+            .alignment(align)
+        })
+        .collect()
+}
+
 /// The summary-screen action row. A new user can import the logins we found,
 /// with secondary controls for a selective import and telemetry settings.
 fn import_summary_pills_line(
@@ -601,10 +646,10 @@ fn welcome_body_lines(app: &dyn TuiState) -> Vec<Line<'static>> {
             push_esc_skip_hint(&mut lines, align);
             return lines;
         }
-        OnboardingWelcomeKind::LoginOpenAi { yes_highlighted } => {
+        OnboardingWelcomeKind::LoginOpenAi { selected, rows } => {
             lines.push(
                 Line::from(Span::styled(
-                    "Log in to OpenAI?",
+                    "How do you want to log in?",
                     Style::default()
                         .fg(welcome_accent())
                         .add_modifier(Modifier::BOLD),
@@ -612,12 +657,15 @@ fn welcome_body_lines(app: &dyn TuiState) -> Vec<Line<'static>> {
                 .alignment(align),
             );
             lines.push(Line::from(""));
-
-            // Rounded Yes/No lozenge pills; the selection is shown visually (the
-            // filled capsule), so no instruction sentence is needed.
-            lines.push(yes_no_pill_line(yes_highlighted, align));
-            // The Esc hint below already says you can log in later with /login,
-            // so we don't repeat a "choose No to skip" line here.
+            lines.extend(login_choice_lines(&rows, selected, align));
+            lines.push(Line::from(""));
+            lines.push(
+                Line::from(Span::styled(
+                    "Up/Down to move, 1-7 to pick, Enter to choose",
+                    Style::default().fg(dim_color()),
+                ))
+                .alignment(align),
+            );
             push_esc_skip_hint(&mut lines, align);
             return lines;
         }

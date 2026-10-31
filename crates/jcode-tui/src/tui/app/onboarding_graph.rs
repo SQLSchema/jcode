@@ -420,6 +420,15 @@ pub fn graph() -> Vec<Edge> {
             keystrokes: 0,
             is_escape: false,
         },
+        // The sign-in list's "Reuse logins" row opens the same detected-login
+        // review a fresh install with other tools gets.
+        Edge {
+            from: LoginOpenAi,
+            to: LoginImport,
+            edge: E::RouteImportable,
+            keystrokes: 1,
+            is_escape: false,
+        },
         // ---- Import review ----
         Edge {
             from: LoginImport,

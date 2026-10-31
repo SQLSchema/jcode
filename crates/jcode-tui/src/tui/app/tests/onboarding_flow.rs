@@ -1,6 +1,6 @@
 // Integration tests for the first-run onboarding flow control logic.
 
-use super::onboarding_flow::{ExternalCli, OnboardingFlow, OnboardingPhase};
+use super::onboarding_flow::{ExternalCli, LoginChoice, OnboardingFlow, OnboardingPhase};
 
 #[derive(Clone)]
 struct QualityFirstOpenAiProvider {
@@ -338,20 +338,31 @@ fn login_openai_phase_is_default_when_no_imports() {
         let mut app = create_test_app();
         app.onboarding_flow = None;
         // Fresh temp home has no importable logins, so begin_at_login lands on
-        // the "Log in to OpenAI?" Yes/No prompt (not the bare provider picker).
+        // the sign-in list (not the bare provider picker), Claude highlighted.
         app.begin_onboarding_flow_at_login();
         assert!(matches!(
             app.onboarding_phase(),
-            Some(OnboardingPhase::LoginOpenAi {
-                yes_highlighted: true
-            })
+            Some(OnboardingPhase::LoginOpenAi { selected: 0 })
         ));
-        assert!(matches!(
-            app.onboarding_welcome_kind(),
-            OnboardingWelcomeKind::LoginOpenAi {
-                yes_highlighted: true
+        match app.onboarding_welcome_kind() {
+            OnboardingWelcomeKind::LoginOpenAi { selected, rows } => {
+                assert_eq!(selected, 0);
+                let titles: Vec<&str> = rows.iter().map(|(t, _)| t.as_str()).collect();
+                assert_eq!(
+                    titles,
+                    [
+                        "Claude",
+                        "OpenAI",
+                        "Reuse logins",
+                        "API key",
+                        "Local model",
+                        "Browse all",
+                        "Skip for now"
+                    ]
+                );
             }
-        ));
+            other => panic!("expected the sign-in list, got {other:?}"),
+        }
     });
 }
 
@@ -362,9 +373,7 @@ fn login_openai_no_finishes_onboarding_with_login_hint() {
         app.onboarding_flow = None;
         app.begin_onboarding_flow_at_login();
         if let Some(flow) = app.onboarding_flow.as_mut() {
-            flow.phase = OnboardingPhase::LoginOpenAi {
-                yes_highlighted: true,
-            };
+            flow.phase = OnboardingPhase::LoginOpenAi { selected: 0 };
         }
         assert!(app.inline_interactive_state.is_none());
         let before = app.display_messages().len();
@@ -389,32 +398,195 @@ fn login_openai_no_finishes_onboarding_with_login_hint() {
 }
 
 #[test]
-fn login_openai_arrows_toggle_highlight() {
+fn login_openai_arrows_move_highlight_and_wrap() {
     with_temp_jcode_home(|| {
         let mut app = create_test_app();
         app.onboarding_flow = None;
         app.begin_onboarding_flow_at_login();
         if let Some(flow) = app.onboarding_flow.as_mut() {
-            flow.phase = OnboardingPhase::LoginOpenAi {
-                yes_highlighted: true,
-            };
+            flow.phase = OnboardingPhase::LoginOpenAi { selected: 0 };
         }
-        // Right highlights No, Left highlights Yes; nothing commits yet.
-        assert!(app.handle_onboarding_continue_prompt_key(KeyCode::Right));
+        let selected = |app: &App| match app.onboarding_phase() {
+            Some(OnboardingPhase::LoginOpenAi { selected }) => *selected,
+            other => panic!("left the sign-in list: {other:?}"),
+        };
+        // Down / j / Tab move forward; nothing commits yet.
+        assert!(app.handle_onboarding_continue_prompt_key(KeyCode::Down));
+        assert_eq!(selected(&app), 1);
+        assert!(app.handle_onboarding_continue_prompt_key(KeyCode::Char('j')));
+        assert!(app.handle_onboarding_continue_prompt_key(KeyCode::Tab));
+        assert_eq!(selected(&app), 3);
+        // Up / k move back; Up from the first row wraps to Skip.
+        assert!(app.handle_onboarding_continue_prompt_key(KeyCode::Char('k')));
+        assert!(app.handle_onboarding_continue_prompt_key(KeyCode::Up));
+        assert!(app.handle_onboarding_continue_prompt_key(KeyCode::Up));
+        assert_eq!(selected(&app), 0);
+        assert!(app.handle_onboarding_continue_prompt_key(KeyCode::Up));
+        assert_eq!(selected(&app), LoginChoice::ALL.len() - 1);
+        assert!(app.inline_interactive_state.is_none());
+    });
+}
+
+#[test]
+fn login_choice_digit_seven_and_enter_on_skip_both_skip() {
+    for keys in [vec![KeyCode::Char('7')], vec![KeyCode::Up, KeyCode::Enter]] {
+        with_temp_jcode_home(|| {
+            let mut app = create_test_app();
+            app.onboarding_flow = None;
+            app.begin_onboarding_flow_at_login();
+            for key in &keys {
+                assert!(app.handle_onboarding_continue_prompt_key(*key));
+            }
+            assert!(app.onboarding_phase().is_none(), "{keys:?} must skip");
+            assert!(app.inline_interactive_state.is_none());
+            assert!(
+                app.display_messages()
+                    .last()
+                    .is_some_and(|m| m.content.contains("/login")),
+                "{keys:?}: skip leaves a /login hint"
+            );
+        });
+    }
+}
+
+#[test]
+fn login_choice_browse_all_opens_full_picker_and_typing_filters() {
+    with_temp_jcode_home(|| {
+        let mut app = create_test_app();
+        app.onboarding_flow = None;
+        app.begin_onboarding_flow_at_login();
+        let full = crate::tui::app::onboarding_flow::login_provider_count();
+        assert!(app.handle_onboarding_continue_prompt_key(KeyCode::Char('6')));
+        let picker = app
+            .inline_interactive_state
+            .as_ref()
+            .expect("Browse all opens the provider picker");
+        assert_eq!(picker.kind, crate::tui::PickerKind::Login);
+        assert!(picker.entries.len() >= full, "{} < {full}", picker.entries.len());
+        // The onboarding key interceptor must stand aside once the picker is
+        // open, so typed characters reach the picker filter (the old
+        // input-echo bug). Drive the real key path, not the helper.
+        for c in "groq".chars() {
+            app.handle_key(KeyCode::Char(c), KeyModifiers::empty()).unwrap();
+        }
+        let picker = app.inline_interactive_state.as_ref().expect("picker stays open");
+        assert_eq!(picker.filter, "groq");
+        assert!(
+            picker.filtered.iter().any(|&i| picker.entries[i].name == "Groq"),
+            "typing filters the picker"
+        );
+        // Still in the sign-in phase underneath (login not finished yet).
         assert!(matches!(
             app.onboarding_phase(),
-            Some(OnboardingPhase::LoginOpenAi {
-                yes_highlighted: false
-            })
+            Some(OnboardingPhase::LoginOpenAi { .. })
         ));
-        assert!(app.handle_onboarding_continue_prompt_key(KeyCode::Left));
+    });
+}
+
+#[test]
+fn login_choice_api_key_and_local_rows_narrow_the_picker() {
+    use crate::tui::PickerAction;
+    use crate::tui::app::onboarding_flow::{is_api_key_provider, is_local_provider};
+    with_temp_jcode_home(|| {
+        let mut app = create_test_app();
+        app.onboarding_flow = None;
+        app.begin_onboarding_flow_at_login();
+        assert!(app.handle_onboarding_continue_prompt_key(KeyCode::Char('4')));
+        let picker = app.inline_interactive_state.as_ref().expect("API key picker");
+        assert_eq!(
+            picker.entries.len(),
+            crate::tui::app::onboarding_flow::api_key_provider_count()
+        );
+        assert!(picker.entries.iter().all(|e| matches!(
+            &e.action,
+            PickerAction::Login(p) if is_api_key_provider(p)
+        )));
+        assert!(picker.entries.iter().any(|e| e.name == "DeepSeek"));
+        // Typing still filters inside the narrowed list.
+        for c in "deep".chars() {
+            app.handle_key(KeyCode::Char(c), KeyModifiers::empty()).unwrap();
+        }
+        let picker = app.inline_interactive_state.as_ref().unwrap();
+        assert_eq!(picker.filter, "deep");
+        let hits: Vec<&str> = picker
+            .filtered
+            .iter()
+            .map(|&i| picker.entries[i].name.as_str())
+            .collect();
+        assert!(hits.contains(&"DeepSeek"), "{hits:?}");
+        assert!(hits.len() < picker.entries.len(), "typing narrowed nothing: {hits:?}");
+    });
+    with_temp_jcode_home(|| {
+        let mut app = create_test_app();
+        app.onboarding_flow = None;
+        app.begin_onboarding_flow_at_login();
+        assert!(app.handle_onboarding_continue_prompt_key(KeyCode::Char('5')));
+        let picker = app.inline_interactive_state.as_ref().expect("local picker");
+        let names: Vec<&str> = picker.entries.iter().map(|e| e.name.as_str()).collect();
+        assert!(names.contains(&"Ollama") && names.contains(&"LM Studio"), "{names:?}");
+        assert!(picker.entries.iter().all(|e| matches!(
+            &e.action,
+            PickerAction::Login(p) if is_local_provider(p)
+        )));
+    });
+}
+
+#[test]
+fn login_choice_reuse_logins_without_detected_logins_stays_on_list() {
+    with_temp_jcode_home(|| {
+        let mut app = create_test_app();
+        app.onboarding_flow = None;
+        app.begin_onboarding_flow_at_login();
+        // Empty temp home: nothing to import, so the list stays put with a hint
+        // instead of dead-ending.
+        assert!(app.handle_onboarding_continue_prompt_key(KeyCode::Char('3')));
         assert!(matches!(
             app.onboarding_phase(),
-            Some(OnboardingPhase::LoginOpenAi {
-                yes_highlighted: true
-            })
+            Some(OnboardingPhase::LoginOpenAi { selected: 2 })
         ));
         assert!(app.inline_interactive_state.is_none());
+    });
+}
+
+#[test]
+fn login_choice_claude_and_openai_rows_start_their_sign_in() {
+    // Rows 1 and 2 hand off to the real OAuth starters, which need the async
+    // runtime the live app has. Inside a runtime, choosing the row must leave
+    // a pending sign-in (or move on when that provider is already connected).
+    for key in ['1', '2'] {
+        with_temp_jcode_home(|| {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            let _guard = rt.enter();
+            let mut app = create_test_app();
+            app.onboarding_flow = None;
+            app.begin_onboarding_flow_at_login();
+            assert!(app.handle_onboarding_continue_prompt_key(KeyCode::Char(key)));
+            let moved_on = !matches!(
+                app.onboarding_phase(),
+                Some(OnboardingPhase::LoginOpenAi { .. })
+            );
+            assert!(
+                moved_on || app.pending_login.is_some(),
+                "row {key} neither started a sign-in nor moved on"
+            );
+        });
+    }
+}
+
+#[test]
+fn login_choice_digits_out_of_range_are_swallowed() {
+    with_temp_jcode_home(|| {
+        let mut app = create_test_app();
+        app.onboarding_flow = None;
+        app.begin_onboarding_flow_at_login();
+        assert!(app.handle_onboarding_continue_prompt_key(KeyCode::Char('9')));
+        assert!(matches!(
+            app.onboarding_phase(),
+            Some(OnboardingPhase::LoginOpenAi { selected: 0 })
+        ));
     });
 }
 
@@ -1085,9 +1257,7 @@ fn liveness_every_login_phase_has_a_single_keypress_exit() {
             // OpenAI prompt: "n" declines and finishes onboarding immediately.
             (
                 "LoginOpenAi",
-                OnboardingPhase::LoginOpenAi {
-                    yes_highlighted: true,
-                },
+                OnboardingPhase::LoginOpenAi { selected: 0 },
                 KeyCode::Char('n'),
             ),
             // Recovery fallback: Enter opens the provider picker overlay.
@@ -1231,9 +1401,7 @@ fn liveness_esc_always_exits_onboarding_from_every_guided_phase() {
         let phases: Vec<(&str, OnboardingPhase, bool)> = vec![
             (
                 "LoginOpenAi",
-                OnboardingPhase::LoginOpenAi {
-                    yes_highlighted: true,
-                },
+                OnboardingPhase::LoginOpenAi { selected: 0 },
                 false,
             ),
             (
